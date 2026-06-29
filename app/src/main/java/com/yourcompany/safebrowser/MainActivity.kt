@@ -129,9 +129,9 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(layout)
 
-        if (savedInstanceState == null) {
-            webView.loadUrl("https://www.google.com")
-        }
+       
+    // Always load Google homepage
+        webView.loadUrl("https://www.google.com")
     }
 
     private fun loadBlocklist() {
