@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.SafeBrowser" parent="Theme.AppCompat.Light.DarkActionBar">
+        <item name="colorPrimary">#1976D2</item>
+        <item name="colorPrimaryDark">#1565C0</item>
+        <item name="colorAccent">#FF4081</item>
+    </style>
+</resources>
