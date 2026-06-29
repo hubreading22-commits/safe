@@ -14,7 +14,7 @@ A secure Android browser with remote blocklist configuration and video blocking.
 
 ### 1. Configure Server URL
 
-Edit `app/src/main/java/com/yourcompany/safebrowser/MainActivity.kt` and change:
+Edit `app/src/main/java/com/readinghub/safebrowser/MainActivity.kt` and change:
 ```kotlin
 private const val REMOTE_CONFIG_URL = "https://yourserver.com/blocklist.json"
 ```

@@ -1,18 +1,20 @@
-package com.yourcompany.safebrowser
+package com.readinghub.safebrowser
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.webkit.*
-import android.widget.EditText
-import android.widget.ImageButton
-import android.widget.LinearLayout
-import android.widget.Toast
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.google.gson.Gson
 import java.net.HttpURLConnection
 import java.net.URL
@@ -61,52 +63,102 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
-        val layout = LinearLayout(this).apply {
+        val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#F1F3F4"))
         }
 
-        val addressBar = LinearLayout(this).apply {
+        // === TOP BAR (Chrome-like) ===
+        val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(8, 8, 8, 8)
+            setPadding(12, 12, 12, 12)
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            elevation = 4f
         }
 
-        val backButton = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_media_previous)
-            setOnClickListener { if (webView.canGoBack()) webView.goBack() }
+        // Back button
+        val backBtn = createNavButton(android.R.drawable.ic_media_previous, "Back")
+        backBtn.setOnClickListener { if (webView.canGoBack()) webView.goBack() }
+
+        // Forward button
+        val forwardBtn = createNavButton(android.R.drawable.ic_media_next, "Forward")
+        forwardBtn.setOnClickListener { if (webView.canGoForward()) webView.goForward() }
+
+        // Refresh button
+        val refreshBtn = createNavButton(android.R.drawable.ic_popup_sync, "Refresh")
+        refreshBtn.setOnClickListener { webView.reload() }
+
+        // Address bar container (rounded like Chrome)
+        val addressContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(12, 6, 12, 6)
+            setBackgroundColor(Color.parseColor("#F1F3F4"))
+            val shape = GradientDrawable().apply {
+                cornerRadius = 48f
+                setColor(Color.parseColor("#FFFFFF"))
+            }
+            background = shape
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(8, 0, 8, 0)
+            }
         }
 
-        val forwardButton = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_media_next)
-            setOnClickListener { if (webView.canGoForward()) webView.goForward() }
+        // Security icon (lock)
+        val lockIcon = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_lock_idle_lock)
+            setColorFilter(Color.parseColor("#5F6368"))
+            layoutParams = LinearLayout.LayoutParams(36, 36)
         }
+        addressContainer.addView(lockIcon)
 
-        val refreshButton = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_popup_sync)
-            setOnClickListener { webView.reload() }
-        }
-
+        // URL input field
         urlInput = EditText(this).apply {
-            hint = "Enter URL or search..."
+            hint = "Search or type URL"
+            setBackgroundColor(Color.TRANSPARENT)
+            setTextColor(Color.parseColor("#202124"))
+            setHintTextColor(Color.parseColor("#9AA0A6"))
+            textSize = 14f
             maxLines = 1
+            isSingleLine = true
+            setPadding(8, 0, 8, 0)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnEditorActionListener { _, actionId, _ ->
-                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO) {
+                if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_SEARCH) {
                     loadUrl(text.toString())
                     true
                 } else false
             }
         }
+        addressContainer.addView(urlInput)
 
-        val goButton = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_media_play)
+        // Go button (magnifying glass)
+        val goBtn = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_search)
+            setColorFilter(Color.parseColor("#5F6368"))
+            layoutParams = LinearLayout.LayoutParams(36, 36)
             setOnClickListener { loadUrl(urlInput.text.toString()) }
         }
+        addressContainer.addView(goBtn)
 
-        addressBar.addView(backButton)
-        addressBar.addView(forwardButton)
-        addressBar.addView(refreshButton)
-        addressBar.addView(urlInput, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        addressBar.addView(goButton)
+        // Assemble top bar
+        topBar.addView(backBtn)
+        topBar.addView(forwardBtn)
+        topBar.addView(refreshBtn)
+        topBar.addView(addressContainer)
 
+        // === PROGRESS BAR ===
+        val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 3)
+            progressDrawable = ContextCompat.getDrawable(this@MainActivity, android.R.drawable.progress_horizontal)
+            visibility = View.GONE
+        }
+        (progressBar.progressDrawable as? android.graphics.drawable.LayerDrawable)?.getDrawable(1)?.setColorFilter(
+            Color.parseColor("#1A73E8"), android.graphics.PorterDuff.Mode.SRC_IN
+        )
+
+        // === WEBVIEW ===
         webView = WebView(this).apply {
             settings.apply {
                 javaScriptEnabled = true
@@ -115,23 +167,56 @@ class MainActivity : AppCompatActivity() {
                 mediaPlaybackRequiresUserGesture = true
                 builtInZoomControls = true
                 displayZoomControls = false
+                useWideViewPort = true
+                loadWithOverviewMode = true
             }
-            webViewClient = SafeWebViewClient()
-            webChromeClient = SafeWebChromeClient()
+            webViewClient = SafeWebViewClient(progressBar)
+            webChromeClient = SafeWebChromeClient(progressBar)
         }
 
-        layout.addView(addressBar)
-        layout.addView(webView, LinearLayout.LayoutParams(
+        // Assemble root layout
+        rootLayout.addView(topBar)
+        rootLayout.addView(progressBar)
+        rootLayout.addView(webView, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.MATCH_PARENT,
             1f
         ))
 
-        setContentView(layout)
-
-       
-    // Always load Google homepage
+        setContentView(rootLayout)
         webView.loadUrl("https://www.google.com")
+    }
+
+    private fun createNavButton(iconRes: Int, contentDesc: String): ImageView {
+        return ImageView(this).apply {
+            setImageResource(iconRes)
+            setColorFilter(Color.parseColor("#5F6368"))
+            layoutParams = LinearLayout.LayoutParams(44, 44).apply {
+                setMargins(4, 0, 4, 0)
+            }
+            setPadding(8, 8, 8, 8)
+            contentDescription = contentDesc
+        }
+    }
+
+    // === FIXED: Check blocking when loading from address bar ===
+    private fun loadUrl(input: String) {
+        if (input.isBlank()) return
+
+        val url = when {
+            input.startsWith("http://") || input.startsWith("https://") -> input
+            input.contains(".") && !input.contains(" ") -> "https://$input"
+            else -> "https://www.google.com/search?q=${android.net.Uri.encode(input)}"
+        }
+
+        // CHECK IF BLOCKED BEFORE LOADING
+        if (isBlocked(url)) {
+            webView.loadDataWithBaseURL(null, getBlockedHtml(), "text/html", "UTF-8", null)
+            urlInput.setText(url)
+            return
+        }
+
+        webView.loadUrl(url)
     }
 
     private fun loadBlocklist() {
@@ -215,16 +300,6 @@ class MainActivity : AppCompatActivity() {
         handler.postDelayed(refreshRunnable!!, REFRESH_INTERVAL_MS)
     }
 
-    private fun loadUrl(input: String) {
-        val url = when {
-            input.isBlank() -> return
-            input.startsWith("http://") || input.startsWith("https://") -> input
-            input.contains(".") -> "https://$input"
-            else -> "https://www.google.com/search?q=${android.net.Uri.encode(input)}"
-        }
-        webView.loadUrl(url)
-    }
-
     private fun isBlocked(url: String): Boolean {
         val lowerUrl = url.lowercase()
         if (blockedDomains.any { lowerUrl.contains(it.lowercase()) }) return true
@@ -242,35 +317,35 @@ class MainActivity : AppCompatActivity() {
         return """
             (function() {
                 function killVideos() {
-                    var videos = document.querySelectorAll('video, audio');
+                    var videos = document.querySelectorAll("video, audio");
                     videos.forEach(function(v) {
-                        v.pause(); v.src = ''; v.load(); v.remove();
+                        v.pause(); v.src = ""; v.load(); v.remove();
                     });
-                    var iframes = document.querySelectorAll('iframe');
+                    var iframes = document.querySelectorAll("iframe");
                     iframes.forEach(function(f) {
                         var src = f.src.toLowerCase();
-                        if(src.includes('youtube') || src.includes('youtu.be') ||
-                           src.includes('vimeo') || src.includes('dailymotion') ||
-                           src.includes('twitch') || src.includes('tiktok') ||
-                           src.includes('netflix') || src.includes('primevideo') ||
-                           src.includes('disney') || src.includes('hulu')) {
-                            f.src = 'about:blank'; f.remove();
+                        if(src.includes("youtube") || src.includes("youtu.be") ||
+                           src.includes("vimeo") || src.includes("dailymotion") ||
+                           src.includes("twitch") || src.includes("tiktok") ||
+                           src.includes("netflix") || src.includes("primevideo") ||
+                           src.includes("disney") || src.includes("hulu")) {
+                            f.src = "about:blank"; f.remove();
                         }
                     });
-                    var selectors = ['[class*="video"]','[class*="player"]','[class*="stream"]','[id*="video"]','[id*="player"]','[id*="stream"]','.ytp-player','.html5-video-player','.video-js','.jwplayer','.plyr','.mejs__container'];
+                    var selectors = ["[class*=\"video\"]","[class*=\"player\"]","[class*=\"stream\"]","[id*=\"video\"]","[id*=\"player\"]","[id*=\"stream\"]",".ytp-player",".html5-video-player",".video-js",".jwplayer",".plyr",".mejs__container"];
                     selectors.forEach(function(sel) {
-                        document.querySelectorAll(sel).forEach(function(el) { el.style.display = 'none'; });
+                        document.querySelectorAll(sel).forEach(function(el) { el.style.display = "none"; });
                     });
                 }
                 killVideos();
                 var observer = new MutationObserver(function(mutations) {
                     mutations.forEach(function(mutation) {
                         mutation.addedNodes.forEach(function(node) {
-                            if(node.tagName === 'VIDEO' || node.tagName === 'AUDIO' || node.tagName === 'IFRAME') {
+                            if(node.tagName === "VIDEO" || node.tagName === "AUDIO" || node.tagName === "IFRAME") {
                                 killVideos();
                             }
                             if(node.querySelectorAll) {
-                                if(node.querySelectorAll('video, audio, iframe').length > 0) killVideos();
+                                if(node.querySelectorAll("video, audio, iframe").length > 0) killVideos();
                             }
                         });
                     });
@@ -279,25 +354,25 @@ class MainActivity : AppCompatActivity() {
                 var originalFetch = window.fetch;
                 window.fetch = function(url, options) {
                     var urlStr = url.toString().toLowerCase();
-                    if(urlStr.includes('.mp4') || urlStr.includes('.webm') || urlStr.includes('.m3u8') || urlStr.includes('.ts') || urlStr.includes('.mkv') || urlStr.includes('.avi') || urlStr.includes('.mov') || urlStr.includes('video') || urlStr.includes('stream') || urlStr.includes('blob:')) {
-                        return Promise.reject(new Error('Video blocked'));
+                    if(urlStr.includes(".mp4") || urlStr.includes(".webm") || urlStr.includes(".m3u8") || urlStr.includes(".ts") || urlStr.includes(".mkv") || urlStr.includes(".avi") || urlStr.includes(".mov") || urlStr.includes("video") || urlStr.includes("stream") || urlStr.includes("blob:")) {
+                        return Promise.reject(new Error("Video blocked"));
                     }
                     return originalFetch(url, options);
                 };
                 var originalOpen = window.XMLHttpRequest.prototype.open;
                 window.XMLHttpRequest.prototype.open = function(method, url) {
                     var urlStr = url.toString().toLowerCase();
-                    if(urlStr.includes('.mp4') || urlStr.includes('.webm') || urlStr.includes('.m3u8') || urlStr.includes('.ts') || urlStr.includes('.mkv') || urlStr.includes('.avi') || urlStr.includes('.mov') || urlStr.includes('video') || urlStr.includes('stream')) {
+                    if(urlStr.includes(".mp4") || urlStr.includes(".webm") || urlStr.includes(".m3u8") || urlStr.includes(".ts") || urlStr.includes(".mkv") || urlStr.includes(".avi") || urlStr.includes(".mov") || urlStr.includes("video") || urlStr.includes("stream")) {
                         return;
                     }
                     return originalOpen.apply(this, arguments);
                 };
                 var originalSetAttribute = Element.prototype.setAttribute;
                 Element.prototype.setAttribute = function(name, value) {
-                    if(this.tagName === 'VIDEO' || this.tagName === 'AUDIO') {
-                        if(name === 'src' || name === 'data-src') {
+                    if(this.tagName === "VIDEO" || this.tagName === "AUDIO") {
+                        if(name === "src" || name === "data-src") {
                             var valStr = value.toString().toLowerCase();
-                            if(valStr.includes('.mp4') || valStr.includes('.webm') || valStr.includes('.m3u8') || valStr.includes('.ts')) {
+                            if(valStr.includes(".mp4") || valStr.includes(".webm") || valStr.includes(".m3u8") || valStr.includes(".ts")) {
                                 return;
                             }
                         }
@@ -308,7 +383,9 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
     }
 
-    inner class SafeWebViewClient : WebViewClient() {
+    // === WebViewClient with progress bar ===
+    inner class SafeWebViewClient(private val progressBar: ProgressBar) : WebViewClient() {
+
         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
             val url = request?.url.toString()
             if (isBlocked(url)) {
@@ -318,29 +395,43 @@ class MainActivity : AppCompatActivity() {
             urlInput.setText(url)
             return false
         }
+
         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
             super.onPageStarted(view, url, favicon)
+            progressBar.visibility = View.VISIBLE
+            progressBar.progress = 0
             urlInput.setText(url)
         }
+
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
+            progressBar.visibility = View.GONE
+            progressBar.progress = 100
             if (videoBlocking) view?.evaluateJavascript(getVideoBlockScript(), null)
         }
+
         override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
             super.onReceivedError(view, request, error)
-            Log.e(TAG, "WebView error: ${'$'}{error?.description}")
+            progressBar.visibility = View.GONE
+            Log.e(TAG, "WebView error: ${error?.description}")
         }
     }
 
-    inner class SafeWebChromeClient : WebChromeClient() {
+    // === WebChromeClient with progress bar ===
+    inner class SafeWebChromeClient(private val progressBar: ProgressBar) : WebChromeClient() {
+        override fun onProgressChanged(view: WebView?, newProgress: Int) {
+            super.onProgressChanged(view, newProgress)
+            progressBar.progress = newProgress
+            if (newProgress > 50 && videoBlocking) {
+                view?.evaluateJavascript(getVideoBlockScript(), null)
+            }
+        }
+
         override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
             Toast.makeText(this@MainActivity, "Fullscreen video is blocked", Toast.LENGTH_SHORT).show()
         }
+
         override fun onHideCustomView() {}
-        override fun onProgressChanged(view: WebView?, newProgress: Int) {
-            super.onProgressChanged(view, newProgress)
-            if (videoBlocking && newProgress > 50) view?.evaluateJavascript(getVideoBlockScript(), null)
-        }
     }
 
     override fun onBackPressed() {

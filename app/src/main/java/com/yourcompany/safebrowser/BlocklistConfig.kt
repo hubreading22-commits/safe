@@ -1,4 +1,4 @@
-package com.yourcompany.safebrowser
+package com.readinghub.safebrowser
 
 import com.google.gson.annotations.SerializedName
 
