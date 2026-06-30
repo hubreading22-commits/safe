@@ -682,7 +682,7 @@ class MainActivity : AppCompatActivity() {
             }
             if (videoBlocking && url != null && url != lastVideoScriptInjectedForUrl) {
                 lastVideoScriptInjectedForUrl = url
-                view.evaluateJavascript(getVideoBlockScript(), null)
+                view?.evaluateJavascript(getVideoBlockScript(), null)
             }
             url?.let { domainTracker.trackDomain(it) }
         }
@@ -710,7 +710,7 @@ class MainActivity : AppCompatActivity() {
             if (newProgress in 50..55 && videoBlocking) {
                 val currentUrl = view?.url
                 if (currentUrl != null && currentUrl != lastVideoScriptInjectedForUrl) {
-                    view.evaluateJavascript(getVideoBlockScript(), null)
+                    view?.evaluateJavascript(getVideoBlockScript(), null)
                 }
             }
         }
