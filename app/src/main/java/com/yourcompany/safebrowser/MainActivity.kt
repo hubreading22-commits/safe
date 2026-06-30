@@ -24,6 +24,8 @@ import android.widget.*
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.google.gson.Gson
 import com.yourcompany.safebrowser.BlocklistConfig
 import java.net.HttpURLConnection
@@ -35,7 +37,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "SafeBrowser"
-        private const val REMOTE_CONFIG_URL = "https://a.proxybotkk.workers.dev"
+        private const val REMOTE_CONFIG_URL = "https://yourserver.com/blocklist.json"
         private const val REFRESH_INTERVAL_MS = 30 * 60 * 1000L
         // If onPageFinished doesn't arrive in this long, stop spinning and let the user act.
         private const val LOAD_WATCHDOG_MS = 20_000L
@@ -340,6 +342,14 @@ class MainActivity : AppCompatActivity() {
             setDownloadListener { url, _, contentDisposition, mimeType, _ ->
                 startDownload(url, contentDisposition, mimeType)
             }
+            // Stronger video blocking: the old approach injected JS after onPageFinished /
+            // mid-progress, by which point the page's own scripts (and the player they build)
+            // had often already run. addDocumentStartJavaScript runs our script before any
+            // page script, on every navigation including iframes, so sites like flyflix can't
+            // win the race by starting playback before our blocking code exists.
+            if (videoBlocking && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                WebViewCompat.addDocumentStartJavaScript(this, getVideoBlockScript(), setOf("*"))
+            }
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
@@ -609,53 +619,97 @@ class MainActivity : AppCompatActivity() {
         if (!videoBlocking) return ""
         return """
             (function() {
+                function neuter(el) {
+                    try { if (el.pause) el.pause(); } catch(e) {}
+                    try { el.src = ""; el.removeAttribute("src"); if (el.load) el.load(); } catch(e) {}
+                    try { el.remove(); } catch(e) {}
+                }
+
+                // Block playback at the prototype level: works no matter how the player got
+                // built (innerHTML, Shadow DOM, custom player libs), not just elements we
+                // happen to spot via MutationObserver after the fact.
+                try {
+                    var origPlay = HTMLMediaElement.prototype.play;
+                    HTMLMediaElement.prototype.play = function() {
+                        neuter(this);
+                        return Promise.reject(new DOMException("Video blocked", "NotAllowedError"));
+                    };
+                } catch(e) {}
+
+                // Block src / srcObject assignment so a neutered element can't be re-armed.
+                try {
+                    var srcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src");
+                    if (srcDesc && srcDesc.configurable) {
+                        Object.defineProperty(HTMLMediaElement.prototype, "src", {
+                            get: function() { return ""; },
+                            set: function(v) {},
+                            configurable: true
+                        });
+                    }
+                } catch(e) {}
+                try {
+                    var srcObjDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject");
+                    if (srcObjDesc && srcObjDesc.configurable) {
+                        Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+                            get: function() { return null; },
+                            set: function(v) {},
+                            configurable: true
+                        });
+                    }
+                } catch(e) {}
+
+                // Intercept element creation so video/audio elements are dead on arrival,
+                // before any page script gets a working reference to one.
+                try {
+                    var origCreateElement = document.createElement.bind(document);
+                    document.createElement = function(tagName) {
+                        var el = origCreateElement(tagName);
+                        if (typeof tagName === "string" && /^(video|audio)$/i.test(tagName)) {
+                            neuter(el);
+                        }
+                        return el;
+                    };
+                } catch(e) {}
+
+                var blockedIframeHosts = ["youtube", "youtu.be", "vimeo", "dailymotion", "twitch", "tiktok", "netflix", "primevideo", "disney", "hulu"];
                 function killVideos() {
-                    var videos = document.querySelectorAll("video, audio");
-                    videos.forEach(function(v) { v.pause(); v.src = ""; v.load(); v.remove(); });
-                    var iframes = document.querySelectorAll("iframe");
-                    iframes.forEach(function(f) {
-                        var src = f.src.toLowerCase();
-                        if(src.includes("youtube") || src.includes("youtu.be") || src.includes("vimeo") || src.includes("dailymotion") || src.includes("twitch") || src.includes("tiktok") || src.includes("netflix") || src.includes("primevideo") || src.includes("disney") || src.includes("hulu")) {
+                    document.querySelectorAll("video, audio").forEach(neuter);
+                    document.querySelectorAll("iframe").forEach(function(f) {
+                        var src = (f.src || "").toLowerCase();
+                        if (blockedIframeHosts.some(function(h) { return src.includes(h); })) {
                             f.src = "about:blank"; f.remove();
                         }
                     });
-                    var selectors = ["[class*=\"video\"]","[class*=\"player\"]","[class*=\"stream\"]","[id*=\"video\"]","[id*=\"player\"]","[id*=\"stream\"]",".ytp-player",".html5-video-player",".video-js",".jwplayer",".plyr",".mejs__container"];
-                    selectors.forEach(function(sel) { document.querySelectorAll(sel).forEach(function(el) { el.style.display = "none"; }); });
                 }
-                killVideos();
-                var observer = new MutationObserver(function(mutations) {
-                    mutations.forEach(function(mutation) {
-                        mutation.addedNodes.forEach(function(node) {
-                            if(node.tagName === "VIDEO" || node.tagName === "AUDIO" || node.tagName === "IFRAME") killVideos();
-                            if(node.querySelectorAll && node.querySelectorAll("video, audio, iframe").length > 0) killVideos();
-                        });
-                    });
-                });
-                observer.observe(document.body, { childList: true, subtree: true });
-                var originalFetch = window.fetch;
-                window.fetch = function(url, options) {
-                    var urlStr = url.toString().toLowerCase();
-                    if(urlStr.includes(".mp4") || urlStr.includes(".webm") || urlStr.includes(".m3u8") || urlStr.includes(".ts") || urlStr.includes(".mkv") || urlStr.includes(".avi") || urlStr.includes(".mov") || urlStr.includes("video") || urlStr.includes("stream") || urlStr.includes("blob:")) {
-                        return Promise.reject(new Error("Video blocked"));
-                    }
-                    return originalFetch(url, options);
-                };
-                var originalOpen = window.XMLHttpRequest.prototype.open;
-                window.XMLHttpRequest.prototype.open = function(method, url) {
-                    var urlStr = url.toString().toLowerCase();
-                    if(urlStr.includes(".mp4") || urlStr.includes(".webm") || urlStr.includes(".m3u8") || urlStr.includes(".ts") || urlStr.includes(".mkv") || urlStr.includes(".avi") || urlStr.includes(".mov") || urlStr.includes("video") || urlStr.includes("stream")) return;
-                    return originalOpen.apply(this, arguments);
-                };
-                var originalSetAttribute = Element.prototype.setAttribute;
-                Element.prototype.setAttribute = function(name, value) {
-                    if(this.tagName === "VIDEO" || this.tagName === "AUDIO") {
-                        if(name === "src" || name === "data-src") {
-                            var valStr = value.toString().toLowerCase();
-                            if(valStr.includes(".mp4") || valStr.includes(".webm") || valStr.includes(".m3u8") || valStr.includes(".ts")) return;
+
+                function startObserving() {
+                    if (document.body) killVideos();
+                    var observer = new MutationObserver(function() { killVideos(); });
+                    observer.observe(document.documentElement, { childList: true, subtree: true });
+                }
+                if (document.documentElement) startObserving();
+                else document.addEventListener("DOMContentLoaded", startObserving);
+
+                // Network-level block on direct media file / streaming-manifest requests.
+                var blockedExt = [".mp4", ".webm", ".m3u8", ".ts", ".mkv", ".mov", ".flv", ".wmv", ".3gp"];
+                try {
+                    var origFetch = window.fetch;
+                    window.fetch = function(url, options) {
+                        var s = (url || "").toString().toLowerCase();
+                        if (blockedExt.some(function(p) { return s.includes(p); })) {
+                            return Promise.reject(new Error("Video blocked"));
                         }
-                    }
-                    return originalSetAttribute.call(this, name, value);
-                };
+                        return origFetch.apply(this, arguments);
+                    };
+                } catch(e) {}
+                try {
+                    var origOpen = XMLHttpRequest.prototype.open;
+                    XMLHttpRequest.prototype.open = function(method, url) {
+                        var s = (url || "").toString().toLowerCase();
+                        if (blockedExt.some(function(p) { return s.includes(p); })) { return; }
+                        return origOpen.apply(this, arguments);
+                    };
+                } catch(e) {}
             })();
         """.trimIndent()
     }
