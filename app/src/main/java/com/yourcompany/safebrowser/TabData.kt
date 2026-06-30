@@ -7,5 +7,6 @@ data class TabData(
     var url: String = "https://www.google.com",
     var title: String = "New Tab",
     var favicon: android.graphics.Bitmap? = null,
-    var webView: WebView? = null
+    var webView: WebView? = null,
+    var isLoading: Boolean = false
 )

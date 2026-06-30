@@ -81,6 +81,7 @@ class MainActivity : AppCompatActivity() {
     )
 
     private lateinit var domainTracker: DomainTracker
+    private lateinit var downloadStore: DownloadStore
 
     /** Convert dp to px so touch targets are a consistent physical size on every screen density. */
     private fun dp(value: Int): Int =
@@ -90,6 +91,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("SafeBrowserPrefs", Context.MODE_PRIVATE)
         domainTracker = DomainTracker(this)
+        downloadStore = DownloadStore(this)
 
         // Must be registered before STARTED state, so do it in onCreate (issue 7: uploads/file chooser).
         fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -366,13 +368,45 @@ class MainActivity : AppCompatActivity() {
             request.setDescription("Downloading file...")
             request.setTitle(fileName)
             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            // issue 5: everything used to land in DIRECTORY_DOWNLOADS regardless of type. Route
+            // images/video/audio/docs into the matching public folder, like a normal browser does.
+            val folder = publicFolderFor(mimeType, fileName)
+            request.setDestinationInExternalPublicDir(folder, fileName)
             val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            dm.enqueue(request)
+            val downloadId = dm.enqueue(request)
+            // issue 2: nothing was ever recorded anywhere, so there was no way to see past
+            // downloads in-app. Persist it and let DownloadsActivity list/open/delete them.
+            downloadStore.add(
+                DownloadRecord(
+                    downloadId = downloadId,
+                    fileName = fileName,
+                    mimeType = mimeType ?: "*/*",
+                    folder = folder,
+                    timestamp = System.currentTimeMillis(),
+                    sourceUrl = url
+                )
+            )
             Toast.makeText(this, "Downloading $fileName", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Log.e(TAG, "Download failed", e)
             Toast.makeText(this, "Couldn't start download", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun publicFolderFor(mimeType: String?, fileName: String): String {
+        val mime = (mimeType ?: "").lowercase()
+        val ext = fileName.substringAfterLast('.', "").lowercase()
+        return when {
+            mime.startsWith("image/") || ext in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic") ->
+                Environment.DIRECTORY_PICTURES
+            mime.startsWith("video/") || ext in setOf("mp4", "mkv", "webm", "avi", "mov", "3gp") ->
+                Environment.DIRECTORY_MOVIES
+            mime.startsWith("audio/") || ext in setOf("mp3", "wav", "ogg", "m4a", "flac") ->
+                Environment.DIRECTORY_MUSIC
+            mime == "application/pdf" || mime.startsWith("application/msword") ||
+                mime.startsWith("application/vnd") || ext in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv") ->
+                Environment.DIRECTORY_DOCUMENTS
+            else -> Environment.DIRECTORY_DOWNLOADS
         }
     }
 
@@ -384,6 +418,9 @@ class MainActivity : AppCompatActivity() {
         val activeTab = tabs.find { it.id == tabId }
         activeTab?.let {
             urlInput.setText(it.url)
+            // issue 4 follow-up: a tab switch used to leave the OLD tab's loading/progress state
+            // showing even though we just navigated the UI onto a different tab entirely.
+            setLoadingState(it.isLoading)
         }
         updateTabUI()
     }
@@ -513,6 +550,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
+        popup.menu.add("Downloads").setOnMenuItemClickListener {
+            startActivity(Intent(this, DownloadsActivity::class.java))
+            true
+        }
         popup.menu.add("Tracked Domains: " + domainTracker.getTrackedCount())
         popup.menu.add("Upload Domains Now").setOnMenuItemClickListener {
             domainTracker.uploadDomains()
@@ -714,6 +755,21 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
     }
 
+    /**
+     * Bug fix (issue 4): every WebViewClient/WebChromeClient callback receives the WebView
+     * (`view`) that the event actually happened on. The old code ignored that and always wrote
+     * into getActiveTab() / the single shared urlInput / progressBar, regardless of which tab
+     * fired the callback. That's exactly the "tab A and tab B swap url/title" bug: if you start
+     * a search in a background tab, its onPageStarted/onPageFinished still landed on whatever
+     * tab happened to be active at that moment. We now always resolve the *owning* tab from
+     * `view` first, update that tab's own data unconditionally, and only touch the visible
+     * chrome (urlInput/progressBar/refreshBtn) when that tab is the one currently on screen.
+     */
+    private fun findTabFor(view: WebView?): TabData? {
+        if (view == null) return null
+        return tabs.find { it.webView === view }
+    }
+
     inner class SafeWebViewClient : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
             val url = request?.url.toString()
@@ -723,29 +779,35 @@ class MainActivity : AppCompatActivity() {
             }
             // issue 4: tapping a link inside a page doesn't go through loadUrlInWebView(),
             // so show the indicator here too instead of waiting on onPageStarted.
-            setLoadingState(true)
+            val tab = findTabFor(view)
+            if (tab != null) {
+                tab.isLoading = true
+                if (tab.id == activeTabId) setLoadingState(true)
+            }
             return false
         }
 
         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
             super.onPageStarted(view, url, favicon)
-            setLoadingState(true)
-            progressBar.isIndeterminate = false
-            progressBar.progress = 0
-            urlInput.setText(url)
-            getActiveTab()?.let {
-                it.url = url ?: ""
-                it.favicon = favicon
+            val tab = findTabFor(view) ?: return
+            tab.isLoading = true
+            tab.url = url ?: ""
+            tab.favicon = favicon
+            if (tab.id == activeTabId) {
+                setLoadingState(true)
+                progressBar.isIndeterminate = false
+                progressBar.progress = 0
+                urlInput.setText(url)
             }
         }
 
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
-            setLoadingState(false)
-            view?.title?.let { title ->
-                getActiveTab()?.title = title
-                updateTabUI()
-            }
+            val tab = findTabFor(view) ?: return
+            tab.isLoading = false
+            view?.title?.let { title -> tab.title = title }
+            updateTabUI()
+            if (tab.id == activeTabId) setLoadingState(false)
             if (videoBlocking && url != null && url != lastVideoScriptInjectedForUrl) {
                 lastVideoScriptInjectedForUrl = url
                 view?.evaluateJavascript(getVideoBlockScript(), null)
@@ -757,7 +819,9 @@ class MainActivity : AppCompatActivity() {
             super.onReceivedError(view, request, error)
             // issue 6: a failed/cancelled load used to leave the progress bar spinning forever
             // with no way out except killing the app.
-            setLoadingState(false)
+            val tab = findTabFor(view)
+            tab?.isLoading = false
+            if (tab == null || tab.id == activeTabId) setLoadingState(false)
             Log.e(TAG, "WebView error: ${error?.description}")
         }
     }
@@ -765,7 +829,8 @@ class MainActivity : AppCompatActivity() {
     inner class SafeWebChromeClient : WebChromeClient() {
         override fun onProgressChanged(view: WebView?, newProgress: Int) {
             super.onProgressChanged(view, newProgress)
-            if (isLoading) {
+            val tab = findTabFor(view)
+            if (tab != null && tab.id == activeTabId && isLoading) {
                 progressBar.isIndeterminate = false
                 progressBar.progress = newProgress
             }
