@@ -16,6 +16,7 @@ import android.webkit.*
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import com.google.gson.Gson
+import com.yourcompany.safebrowser.BlocklistConfig
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -25,7 +26,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "SafeBrowser"
-        private const val REMOTE_CONFIG_URL = "https://a.proxybotkk.workers.dev"
+        private const val REMOTE_CONFIG_URL = "https://yourserver.com/blocklist.json"
         private const val REFRESH_INTERVAL_MS = 30 * 60 * 1000L
     }
 
