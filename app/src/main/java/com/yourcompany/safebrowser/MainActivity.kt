@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var blocklistPrefs: SharedPreferences
     private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
     private val gson = Gson()
@@ -59,6 +60,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var urlInput: EditText
     private lateinit var progressBar: ProgressBar
     private lateinit var refreshBtn: ImageView
+    private lateinit var downloadPopupBar: LinearLayout
+    private lateinit var downloadPopupText: TextView
+    private var downloadPopupDismissRunnable: Runnable? = null
     private var isLoading = false
 
     // Per-page-load guard so the video-blocking script isn't re-injected on every progress tick.
@@ -90,6 +94,15 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("SafeBrowserPrefs", Context.MODE_PRIVATE)
+        // issue: the blocklist cache used to live in "SafeBrowserPrefs", which
+        // SafeBrowserApp.clearBrowsingData() wipes on every full app close (by design, for
+        // the data-wipe feature). That meant the real, server-pushed blocklist was discarded
+        // every time the app was closed, silently falling back to the small hardcoded list
+        // until the next successful network fetch -- so closing the app with no internet on
+        // the next launch effectively unblocked everything custom. Its own file, parallel to
+        // how DomainTracker keeps tracked domains in a separate file, is never touched by the
+        // close-wipe and survives indefinitely with no internet required.
+        blocklistPrefs = getSharedPreferences("BlocklistCache", Context.MODE_PRIVATE)
         domainTracker = DomainTracker(this)
         downloadStore = DownloadStore(this)
 
@@ -175,7 +188,17 @@ class MainActivity : AppCompatActivity() {
                 getActiveWebView()?.stopLoading()
                 setLoadingState(false)
             } else {
-                getActiveWebView()?.reload()
+                val webView = getActiveWebView()
+                // On a slow/dead connection the WebView can sit on "about:blank" forever
+                // without ever committing the intended URL, in which case reload() is a
+                // no-op and the refresh button visibly does nothing. Fall back to re-issuing
+                // the tab's last known URL through the normal (blocklist-checked) load path.
+                if (webView != null && (webView.url == null || webView.url == "about:blank")) {
+                    getActiveTab()?.url?.takeIf { it.isNotBlank() }?.let { loadUrlInWebView(webView, it) }
+                        ?: webView.reload()
+                } else {
+                    webView?.reload()
+                }
             }
         }
 
@@ -269,15 +292,87 @@ class MainActivity : AppCompatActivity() {
         rootLayout.addView(toolbar)
 
         webViewContainer = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        val contentFrame = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 1f
             )
         }
-        rootLayout.addView(webViewContainer)
+        contentFrame.addView(webViewContainer)
+
+        downloadPopupBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            setPadding(dp(16), dp(12), dp(12), dp(12))
+            val shape = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.parseColor("#323232"))
+            }
+            background = shape
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM
+            ).apply { setMargins(dp(12), dp(12), dp(12), dp(12)) }
+            elevation = dp(6).toFloat()
+        }
+        downloadPopupText = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        downloadPopupBar.addView(downloadPopupText)
+        contentFrame.addView(downloadPopupBar)
+
+        rootLayout.addView(contentFrame)
 
         setContentView(rootLayout)
+    }
+
+    /**
+     * issue 5: downloads only ever surfaced as a brief Toast (gone in ~2s) plus whatever the
+     * system download notification looked like -- nothing resembling Chrome's persistent
+     * "File downloaded" bottom bar with an action button. This shows an in-app bar over the
+     * page that stays until tapped or auto-dismissed, with an "Open" action that jumps
+     * straight to the file, mirroring Chrome's download-complete snackbar.
+     */
+    private fun showDownloadStartedPopup(record: DownloadRecord) {
+        downloadPopupDismissRunnable?.let { handler.removeCallbacks(it) }
+        downloadPopupText.text = "Downloading ${record.fileName}"
+        downloadPopupBar.removeAllViews()
+        downloadPopupBar.addView(downloadPopupText)
+        downloadPopupBar.addView(TextView(this).apply {
+            text = "VIEW"
+            setTextColor(Color.parseColor("#8AB4F8"))
+            textSize = 14f
+            setPadding(dp(12), 0, dp(12), 0)
+            isClickable = true
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, DownloadsActivity::class.java))
+                downloadPopupBar.visibility = View.GONE
+            }
+        })
+        downloadPopupBar.addView(TextView(this).apply {
+            text = "\u2715"
+            setTextColor(Color.parseColor("#9AA0A6"))
+            textSize = 14f
+            setPadding(dp(8), 0, 0, 0)
+            isClickable = true
+            setOnClickListener { downloadPopupBar.visibility = View.GONE }
+        })
+        downloadPopupBar.visibility = View.VISIBLE
+        downloadPopupBar.bringToFront()
+        val dismiss = Runnable { downloadPopupBar.visibility = View.GONE }
+        downloadPopupDismissRunnable = dismiss
+        handler.postDelayed(dismiss, 6000L)
     }
 
     private fun hideKeyboard() {
@@ -387,6 +482,9 @@ class MainActivity : AppCompatActivity() {
                 )
             )
             Toast.makeText(this, "Downloading $fileName", Toast.LENGTH_SHORT).show()
+            showDownloadStartedPopup(
+                DownloadRecord(downloadId, fileName, mimeType ?: "*/*", folder, System.currentTimeMillis(), url)
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Download failed", e)
             Toast.makeText(this, "Couldn't start download", Toast.LENGTH_SHORT).show()
@@ -542,6 +640,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun setLoadingState(loading: Boolean) {
         isLoading = loading
+        // issue: Stop-button taps and the watchdog timeout below only ever updated the visible
+        // chrome (progress bar / refresh icon), never the TabData record itself. That left
+        // tab.isLoading permanently stuck on `true` for a stopped/timed-out load, so switching
+        // away and back to that tab (switchToTab -> setLoadingState(it.isLoading)) resurrected
+        // a spinner for a load that had already ended -- especially visible with multiple tabs
+        // open on a slow connection. Keep the tab model and the chrome in lockstep here.
+        getActiveTab()?.isLoading = loading
         loadWatchdogRunnable?.let { handler.removeCallbacks(it) }
         if (loading) {
             progressBar.visibility = View.VISIBLE
@@ -551,6 +656,7 @@ class MainActivity : AppCompatActivity() {
             // the user stuck -- auto-recover the UI so other taps work again after a timeout.
             loadWatchdogRunnable = Runnable {
                 if (isLoading) {
+                    getActiveWebView()?.stopLoading()
                     setLoadingState(false)
                     Toast.makeText(this, "Taking a while - tap reload or try another link", Toast.LENGTH_SHORT).show()
                 }
@@ -585,16 +691,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadBlocklist() {
-        val cachedDomains = prefs.getStringSet("cached_domains", null)
-        val cachedKeywords = prefs.getStringSet("cached_keywords", null)
-        val cachedVideo = prefs.getBoolean("cached_video_blocking", true)
+        val cachedDomains = blocklistPrefs.getStringSet("cached_domains", null)
+        val cachedKeywords = blocklistPrefs.getStringSet("cached_keywords", null)
+        val cachedVideo = blocklistPrefs.getBoolean("cached_video_blocking", true)
         blockedDomains = if (cachedDomains != null) cachedDomains.toMutableList() else fallbackBlockedDomains.toMutableList()
         blockedKeywords = if (cachedKeywords != null) cachedKeywords.toMutableList() else mutableListOf()
         videoBlocking = cachedVideo
     }
 
     private fun saveBlocklist(domains: List<String>, keywords: List<String>, video: Boolean) {
-        prefs.edit()
+        blocklistPrefs.edit()
             .putStringSet("cached_domains", domains.toSet())
             .putStringSet("cached_keywords", keywords.toSet())
             .putBoolean("cached_video_blocking", video)

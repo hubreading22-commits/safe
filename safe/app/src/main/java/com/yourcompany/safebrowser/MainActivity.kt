@@ -37,13 +37,14 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "SafeBrowser"
-        private const val REMOTE_CONFIG_URL = "https://yourserver.com/blocklist.json"
+        private const val REMOTE_CONFIG_URL = "https://browser.proxybotkk.workers.dev/api/config"
         private const val REFRESH_INTERVAL_MS = 30 * 60 * 1000L
         // If onPageFinished doesn't arrive in this long, stop spinning and let the user act.
         private const val LOAD_WATCHDOG_MS = 20_000L
     }
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var blocklistPrefs: SharedPreferences
     private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
     private val gson = Gson()
@@ -59,6 +60,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var urlInput: EditText
     private lateinit var progressBar: ProgressBar
     private lateinit var refreshBtn: ImageView
+    private lateinit var downloadPopupBar: LinearLayout
+    private lateinit var downloadPopupText: TextView
+    private var downloadPopupDismissRunnable: Runnable? = null
     private var isLoading = false
 
     // Per-page-load guard so the video-blocking script isn't re-injected on every progress tick.
@@ -90,6 +94,15 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("SafeBrowserPrefs", Context.MODE_PRIVATE)
+        // issue: the blocklist cache used to live in "SafeBrowserPrefs", which
+        // SafeBrowserApp.clearBrowsingData() wipes on every full app close (by design, for
+        // the data-wipe feature). That meant the real, server-pushed blocklist was discarded
+        // every time the app was closed, silently falling back to the small hardcoded list
+        // until the next successful network fetch -- so closing the app with no internet on
+        // the next launch effectively unblocked everything custom. Its own file, parallel to
+        // how DomainTracker keeps tracked domains in a separate file, is never touched by the
+        // close-wipe and survives indefinitely with no internet required.
+        blocklistPrefs = getSharedPreferences("BlocklistCache", Context.MODE_PRIVATE)
         domainTracker = DomainTracker(this)
         downloadStore = DownloadStore(this)
 
@@ -175,7 +188,17 @@ class MainActivity : AppCompatActivity() {
                 getActiveWebView()?.stopLoading()
                 setLoadingState(false)
             } else {
-                getActiveWebView()?.reload()
+                val webView = getActiveWebView()
+                // On a slow/dead connection the WebView can sit on "about:blank" forever
+                // without ever committing the intended URL, in which case reload() is a
+                // no-op and the refresh button visibly does nothing. Fall back to re-issuing
+                // the tab's last known URL through the normal (blocklist-checked) load path.
+                if (webView != null && (webView.url == null || webView.url == "about:blank")) {
+                    getActiveTab()?.url?.takeIf { it.isNotBlank() }?.let { loadUrlInWebView(webView, it) }
+                        ?: webView.reload()
+                } else {
+                    webView?.reload()
+                }
             }
         }
 
@@ -269,15 +292,87 @@ class MainActivity : AppCompatActivity() {
         rootLayout.addView(toolbar)
 
         webViewContainer = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        val contentFrame = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 1f
             )
         }
-        rootLayout.addView(webViewContainer)
+        contentFrame.addView(webViewContainer)
+
+        downloadPopupBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            setPadding(dp(16), dp(12), dp(12), dp(12))
+            val shape = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(Color.parseColor("#323232"))
+            }
+            background = shape
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM
+            ).apply { setMargins(dp(12), dp(12), dp(12), dp(12)) }
+            elevation = dp(6).toFloat()
+        }
+        downloadPopupText = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        downloadPopupBar.addView(downloadPopupText)
+        contentFrame.addView(downloadPopupBar)
+
+        rootLayout.addView(contentFrame)
 
         setContentView(rootLayout)
+    }
+
+    /**
+     * issue 5: downloads only ever surfaced as a brief Toast (gone in ~2s) plus whatever the
+     * system download notification looked like -- nothing resembling Chrome's persistent
+     * "File downloaded" bottom bar with an action button. This shows an in-app bar over the
+     * page that stays until tapped or auto-dismissed, with an "Open" action that jumps
+     * straight to the file, mirroring Chrome's download-complete snackbar.
+     */
+    private fun showDownloadStartedPopup(record: DownloadRecord) {
+        downloadPopupDismissRunnable?.let { handler.removeCallbacks(it) }
+        downloadPopupText.text = "Downloading ${record.fileName}"
+        downloadPopupBar.removeAllViews()
+        downloadPopupBar.addView(downloadPopupText)
+        downloadPopupBar.addView(TextView(this).apply {
+            text = "VIEW"
+            setTextColor(Color.parseColor("#8AB4F8"))
+            textSize = 14f
+            setPadding(dp(12), 0, dp(12), 0)
+            isClickable = true
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, DownloadsActivity::class.java))
+                downloadPopupBar.visibility = View.GONE
+            }
+        })
+        downloadPopupBar.addView(TextView(this).apply {
+            text = "\u2715"
+            setTextColor(Color.parseColor("#9AA0A6"))
+            textSize = 14f
+            setPadding(dp(8), 0, 0, 0)
+            isClickable = true
+            setOnClickListener { downloadPopupBar.visibility = View.GONE }
+        })
+        downloadPopupBar.visibility = View.VISIBLE
+        downloadPopupBar.bringToFront()
+        val dismiss = Runnable { downloadPopupBar.visibility = View.GONE }
+        downloadPopupDismissRunnable = dismiss
+        handler.postDelayed(dismiss, 6000L)
     }
 
     private fun hideKeyboard() {
@@ -387,6 +482,9 @@ class MainActivity : AppCompatActivity() {
                 )
             )
             Toast.makeText(this, "Downloading $fileName", Toast.LENGTH_SHORT).show()
+            showDownloadStartedPopup(
+                DownloadRecord(downloadId, fileName, mimeType ?: "*/*", folder, System.currentTimeMillis(), url)
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Download failed", e)
             Toast.makeText(this, "Couldn't start download", Toast.LENGTH_SHORT).show()
@@ -463,6 +561,22 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { switchToTab(tab.id) }
             }
 
+            val faviconView = ImageView(this).apply {
+                val size = dp(16)
+                layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                    setMargins(0, 0, dp(6), 0)
+                }
+                if (tab.favicon != null) {
+                    setImageBitmap(tab.favicon)
+                } else {
+                    // Generic placeholder while the real favicon hasn't arrived yet (or the
+                    // site doesn't have one) instead of leaving a blank gap in the tab pill.
+                    setImageResource(android.R.drawable.ic_menu_compass)
+                    setColorFilter(Color.parseColor("#9AA0A6"))
+                }
+            }
+            tabView.addView(faviconView)
+
             val titleView = TextView(this).apply {
                 text = if (tab.title.length > 15) tab.title.substring(0, 15) + "..." else tab.title
                 textSize = 13f
@@ -526,6 +640,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun setLoadingState(loading: Boolean) {
         isLoading = loading
+        // issue: Stop-button taps and the watchdog timeout below only ever updated the visible
+        // chrome (progress bar / refresh icon), never the TabData record itself. That left
+        // tab.isLoading permanently stuck on `true` for a stopped/timed-out load, so switching
+        // away and back to that tab (switchToTab -> setLoadingState(it.isLoading)) resurrected
+        // a spinner for a load that had already ended -- especially visible with multiple tabs
+        // open on a slow connection. Keep the tab model and the chrome in lockstep here.
+        getActiveTab()?.isLoading = loading
         loadWatchdogRunnable?.let { handler.removeCallbacks(it) }
         if (loading) {
             progressBar.visibility = View.VISIBLE
@@ -535,6 +656,7 @@ class MainActivity : AppCompatActivity() {
             // the user stuck -- auto-recover the UI so other taps work again after a timeout.
             loadWatchdogRunnable = Runnable {
                 if (isLoading) {
+                    getActiveWebView()?.stopLoading()
                     setLoadingState(false)
                     Toast.makeText(this, "Taking a while - tap reload or try another link", Toast.LENGTH_SHORT).show()
                 }
@@ -569,16 +691,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadBlocklist() {
-        val cachedDomains = prefs.getStringSet("cached_domains", null)
-        val cachedKeywords = prefs.getStringSet("cached_keywords", null)
-        val cachedVideo = prefs.getBoolean("cached_video_blocking", true)
+        val cachedDomains = blocklistPrefs.getStringSet("cached_domains", null)
+        val cachedKeywords = blocklistPrefs.getStringSet("cached_keywords", null)
+        val cachedVideo = blocklistPrefs.getBoolean("cached_video_blocking", true)
         blockedDomains = if (cachedDomains != null) cachedDomains.toMutableList() else fallbackBlockedDomains.toMutableList()
         blockedKeywords = if (cachedKeywords != null) cachedKeywords.toMutableList() else mutableListOf()
         videoBlocking = cachedVideo
     }
 
     private fun saveBlocklist(domains: List<String>, keywords: List<String>, video: Boolean) {
-        prefs.edit()
+        blocklistPrefs.edit()
             .putStringSet("cached_domains", domains.toSet())
             .putStringSet("cached_keywords", keywords.toSet())
             .putBoolean("cached_video_blocking", video)
@@ -644,33 +766,24 @@ class MainActivity : AppCompatActivity() {
         handler.postDelayed(refreshRunnable!!, REFRESH_INTERVAL_MS)
     }
 
-    /**
-     * Was doing a raw lowerUrl.contains(it) for both domains and keywords, which is a substring
-     * match over the *entire* URL -- not a real domain check or a real word check. That's why
-     * things outside the configured lists were getting blocked:
-     *   - domain "x.com" as a substring matches the end of "netflix.com", "box.com",
-     *     "xerox.com", etc. (any host that happens to end in those 5 characters).
-     *   - keyword "ig" as a substring matches "log**ig**n", "des**ig**n", "or**ig**inal",
-     *     "d**ig**ital" -- virtually any page, since "ig" appears inside countless ordinary
-     *     words/paths/query strings.
-     * Domains now match on the actual host (exact host or a subdomain of it), and keywords now
-     * require word boundaries so "ig" only matches the standalone word "ig", not letters buried
-     * inside another word.
-     */
     private fun isBlocked(url: String): Boolean {
         val lowerUrl = url.lowercase()
         val host = try { Uri.parse(url).host?.lowercase()?.removePrefix("www.") } catch (e: Exception) { null }
 
-        if (host != null && blockedDomains.any { domain ->
-                val d = domain.lowercase().removePrefix("www.")
+        // issue: "x.com" in blocked_domains was matching netflix.com, box.com, xerox.com
+        // etc. because the old check was lowerUrl.contains(domain) -- a plain substring
+        // search over the *whole URL*. A blocked domain should only match itself or a real
+        // subdomain of itself (host == domain, or host ends with ".domain"), never an
+        // unrelated domain that merely shares trailing characters.
+        if (host != null && blockedDomains.any { raw ->
+                val d = raw.lowercase().removePrefix("www.")
                 host == d || host.endsWith(".$d")
             }) return true
 
-        if (blockedKeywords.any { keyword ->
-                val k = Regex.escape(keyword.lowercase())
-                Regex("(?:^|[^a-z0-9])$k(?:[^a-z0-9]|$)").containsMatchIn(lowerUrl)
-            }) return true
-
+        // Keywords are intentionally still substring-matched (e.g. "vpn" should catch
+        // freevpnapp.com), but that means very short keywords (1-2 chars) can overblock
+        // unrelated sites. Keep an eye on what gets pushed as a keyword from the dashboard.
+        if (blockedKeywords.any { lowerUrl.contains(it.lowercase()) }) return true
         if (videoExtensions.any { lowerUrl.endsWith(it, ignoreCase = true) }) return true
         return false
     }
@@ -679,43 +792,8 @@ class MainActivity : AppCompatActivity() {
         return "<html><head><title>Access Blocked</title><style>body{font-family:Arial,sans-serif;text-align:center;padding-top:100px;background:#f5f5f5;}.block-icon{font-size:80px;color:#d32f2f;}h1{color:#d32f2f;}p{color:#666;font-size:18px;}.back-link{display:inline-block;margin-top:30px;padding:12px 24px;background:#1976d2;color:white;text-decoration:none;border-radius:4px;}</style></head><body><div class=\"block-icon\">&#128683;</div><h1>Access Blocked</h1><p>This website or content has been blocked by your administrator.</p><a href=\"https://www.google.com\" class=\"back-link\">Go back to Google</a></body></html>"
     }
 
-    /**
-     * Chrome-style "this site can't be reached" page, shown when a real page load fails
-     * (DNS failure, no connection, timeout, refused connection, etc.) instead of leaving the
-     * WebView stuck on a blank/half-loaded screen with no way forward. The "Try Again" link
-     * re-requests the same URL, which goes through the normal navigation path (and so will
-     * correctly show the loading indicator again).
-     */
-    private fun getErrorHtml(failingUrl: String?, description: String?): String {
-        val safeUrl = (failingUrl ?: "").replace("\"", "&quot;")
-        val reason = description?.takeIf { it.isNotBlank() } ?: "The connection was interrupted"
-        return """
-            <html><head><title>Page unavailable</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-                body{font-family:Roboto,Arial,sans-serif;background:#fff;color:#202124;
-                    margin:0;padding:48px 24px;}
-                .icon{font-size:64px;color:#9aa0a6;text-align:center;}
-                h1{font-size:20px;font-weight:400;}
-                p{color:#5f6368;font-size:14px;line-height:1.5;}
-                .url{word-break:break-all;color:#5f6368;}
-                .retry{display:inline-block;margin-top:24px;padding:10px 24px;
-                    background:#1a73e8;color:#fff;text-decoration:none;border-radius:4px;
-                    font-size:14px;}
-            </style></head>
-            <body>
-                <div class="icon">&#9888;</div>
-                <h1>This page isn't available</h1>
-                <p>$reason.</p>
-                <p class="url">$safeUrl</p>
-                <p>Check your internet connection, then try again.</p>
-                <a class="retry" href="$safeUrl">Try Again</a>
-            </body></html>
-        """.trimIndent()
-    }
-
     private fun getVideoBlockScript(): String {
-        if (!videoBlocking) return "" ""
+        if (!videoBlocking) return ""
         return """
             (function() {
                 function neuter(el) {
@@ -875,30 +953,26 @@ class MainActivity : AppCompatActivity() {
 
         override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
             super.onReceivedError(view, request, error)
+            // issue 6: a failed/cancelled load used to leave the progress bar spinning forever
+            // with no way out except killing the app.
             val tab = findTabFor(view)
             tab?.isLoading = false
             if (tab == null || tab.id == activeTabId) setLoadingState(false)
             Log.e(TAG, "WebView error: ${error?.description}")
-            // issue: a failed sub-resource (favicon, ad/tracker script, analytics beacon, etc.)
-            // used to fire this same callback as a failed *page* load, so the WebView was left
-            // stuck on a blank/half-rendered screen for something the user never even asked to
-            // navigate to. Only treat it as a page failure -- and show an error page for it --
-            // when it's the actual top-level navigation that failed.
-            if (request != null && !request.isForMainFrame) return
-            val failingUrl = request?.url?.toString() ?: view?.url
-            view?.loadDataWithBaseURL(
-                null,
-                getErrorHtml(failingUrl, error?.description?.toString()),
-                "text/html", "UTF-8", null
-            )
-            if (tab != null) {
-                tab.url = failingUrl ?: tab.url
-                if (tab.id == activeTabId) urlInput.setText(failingUrl)
-            }
         }
     }
 
     inner class SafeWebChromeClient : WebChromeClient() {
+        // The `favicon` param on WebViewClient.onPageStarted is frequently null or a stale
+        // cached bitmap. The actual favicon for the current page reliably arrives here once
+        // the browser engine has fetched it, so capture it here and repaint the tab strip.
+        override fun onReceivedIcon(view: WebView?, icon: android.graphics.Bitmap?) {
+            super.onReceivedIcon(view, icon)
+            val tab = findTabFor(view) ?: return
+            tab.favicon = icon
+            updateTabUI()
+        }
+
         override fun onProgressChanged(view: WebView?, newProgress: Int) {
             super.onProgressChanged(view, newProgress)
             val tab = findTabFor(view)
