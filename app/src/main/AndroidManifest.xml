@@ -8,8 +8,9 @@
     <application
         android:name=".SafeBrowserApp"
         android:allowBackup="true"
-        android:icon="@android:drawable/sym_def_app_icon"
-        android:label="SafeBrowser"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="Chromia"
         android:theme="@style/Theme.SafeBrowser"
         android:usesCleartextTraffic="false">
 
