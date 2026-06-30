@@ -35,7 +35,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "SafeBrowser"
-        private const val REMOTE_CONFIG_URL = "https://yourserver.com/blocklist.json"
+        private const val REMOTE_CONFIG_URL = "https://a.proxybotkk.workers.dev"
         private const val REFRESH_INTERVAL_MS = 30 * 60 * 1000L
         // If onPageFinished doesn't arrive in this long, stop spinning and let the user act.
         private const val LOAD_WATCHDOG_MS = 20_000L
