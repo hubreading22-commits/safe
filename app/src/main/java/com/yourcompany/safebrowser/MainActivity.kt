@@ -145,7 +145,8 @@ class MainActivity : AppCompatActivity() {
         val newTabBtn = createIconButton(android.R.drawable.ic_input_add) { createNewTab("https://www.google.com") }
         topRow.addView(newTabBtn)
 
-        val menuBtn = createIconButton(android.R.drawable.ic_menu_more) { showMenu() }
+        val menuBtn = createIconButton(android.R.drawable.ic_menu_more) { }
+        menuBtn.setOnClickListener { showMenu(menuBtn) }
         topRow.addView(menuBtn)
 
         toolbar.addView(topRow)
@@ -500,8 +501,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showMenu() {
-        val popup = PopupMenu(this, findViewById(android.R.id.content))
+    private fun showMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
         popup.menu.add("Tracked Domains: " + domainTracker.getTrackedCount())
         popup.menu.add("Upload Domains Now").setOnMenuItemClickListener {
             domainTracker.uploadDomains()
@@ -556,16 +557,27 @@ class MainActivity : AppCompatActivity() {
     private fun parseBlocklist(jsonResponse: String) {
         try {
             val config = gson.fromJson(jsonResponse, BlocklistConfig::class.java)
-            if (config.blockedDomains != null && config.blockedDomains.isNotEmpty()) {
-                val domains = config.blockedDomains.toMutableList()
-                val keywords = (config.blockedKeywords ?: emptyList()).toMutableList()
-                val video = config.videoBlocking ?: true
+            // issue: previously the whole update (including keywords) was gated behind
+            // "domains is non-empty", so a config with keywords but no domains was silently
+            // dropped. Domains and keywords are now applied independently.
+            val domains = (config.blockedDomains ?: emptyList()).toMutableList()
+            val keywords = (config.blockedKeywords ?: emptyList()).toMutableList()
+            val video = config.videoBlocking ?: true
+            if (domains.isNotEmpty() || keywords.isNotEmpty()) {
                 handler.post {
-                    blockedDomains = domains
-                    blockedKeywords = keywords
+                    if (domains.isNotEmpty()) blockedDomains = domains
+                    if (keywords.isNotEmpty()) blockedKeywords = keywords
                     videoBlocking = video
-                    saveBlocklist(domains, keywords, video)
-                    Toast.makeText(this, "Blocklist updated: " + domains.size + " domains", Toast.LENGTH_SHORT).show()
+                    saveBlocklist(
+                        if (domains.isNotEmpty()) domains else blockedDomains,
+                        if (keywords.isNotEmpty()) keywords else blockedKeywords,
+                        video
+                    )
+                    Toast.makeText(
+                        this,
+                        "Blocklist updated: ${blockedDomains.size} domains, ${blockedKeywords.size} keywords",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         } catch (e: Exception) {
