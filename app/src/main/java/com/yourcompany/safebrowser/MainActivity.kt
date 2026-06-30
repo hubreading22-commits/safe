@@ -463,6 +463,22 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { switchToTab(tab.id) }
             }
 
+            val faviconView = ImageView(this).apply {
+                val size = dp(16)
+                layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                    setMargins(0, 0, dp(6), 0)
+                }
+                if (tab.favicon != null) {
+                    setImageBitmap(tab.favicon)
+                } else {
+                    // Generic placeholder while the real favicon hasn't arrived yet (or the
+                    // site doesn't have one) instead of leaving a blank gap in the tab pill.
+                    setImageResource(android.R.drawable.ic_menu_compass)
+                    setColorFilter(Color.parseColor("#9AA0A6"))
+                }
+            }
+            tabView.addView(faviconView)
+
             val titleView = TextView(this).apply {
                 text = if (tab.title.length > 15) tab.title.substring(0, 15) + "..." else tab.title
                 textSize = 13f
@@ -646,7 +662,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun isBlocked(url: String): Boolean {
         val lowerUrl = url.lowercase()
-        if (blockedDomains.any { lowerUrl.contains(it.lowercase()) }) return true
+        val host = try { Uri.parse(url).host?.lowercase()?.removePrefix("www.") } catch (e: Exception) { null }
+
+        // issue: "x.com" in blocked_domains was matching netflix.com, box.com, xerox.com
+        // etc. because the old check was lowerUrl.contains(domain) -- a plain substring
+        // search over the *whole URL*. A blocked domain should only match itself or a real
+        // subdomain of itself (host == domain, or host ends with ".domain"), never an
+        // unrelated domain that merely shares trailing characters.
+        if (host != null && blockedDomains.any { raw ->
+                val d = raw.lowercase().removePrefix("www.")
+                host == d || host.endsWith(".$d")
+            }) return true
+
+        // Keywords are intentionally still substring-matched (e.g. "vpn" should catch
+        // freevpnapp.com), but that means very short keywords (1-2 chars) can overblock
+        // unrelated sites. Keep an eye on what gets pushed as a keyword from the dashboard.
         if (blockedKeywords.any { lowerUrl.contains(it.lowercase()) }) return true
         if (videoExtensions.any { lowerUrl.endsWith(it, ignoreCase = true) }) return true
         return false
@@ -827,6 +857,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     inner class SafeWebChromeClient : WebChromeClient() {
+        // The `favicon` param on WebViewClient.onPageStarted is frequently null or a stale
+        // cached bitmap. The actual favicon for the current page reliably arrives here once
+        // the browser engine has fetched it, so capture it here and repaint the tab strip.
+        override fun onReceivedIcon(view: WebView?, icon: android.graphics.Bitmap?) {
+            super.onReceivedIcon(view, icon)
+            val tab = findTabFor(view) ?: return
+            tab.favicon = icon
+            updateTabUI()
+        }
+
         override fun onProgressChanged(view: WebView?, newProgress: Int) {
             super.onProgressChanged(view, newProgress)
             val tab = findTabFor(view)
