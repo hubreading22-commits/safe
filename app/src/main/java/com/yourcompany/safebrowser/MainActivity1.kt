@@ -1,28 +1,19 @@
 package com.yourcompany.safebrowser
 
-import android.app.Activity
-import android.app.DownloadManager
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
-import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.text.InputType
 import android.util.Log
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.*
 import android.widget.*
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.gson.Gson
 import com.yourcompany.safebrowser.BlocklistConfig
@@ -37,8 +28,6 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "SafeBrowser"
         private const val REMOTE_CONFIG_URL = "https://yourserver.com/blocklist.json"
         private const val REFRESH_INTERVAL_MS = 30 * 60 * 1000L
-        // If onPageFinished doesn't arrive in this long, stop spinning and let the user act.
-        private const val LOAD_WATCHDOG_MS = 20_000L
     }
 
     private lateinit var prefs: SharedPreferences
@@ -46,7 +35,6 @@ class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private val gson = Gson()
     private var refreshRunnable: Runnable? = null
-    private var loadWatchdogRunnable: Runnable? = null
     private val tabCounter = AtomicInteger(0)
 
     private val tabs = mutableListOf<TabData>()
@@ -56,15 +44,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webViewContainer: FrameLayout
     private lateinit var urlInput: EditText
     private lateinit var progressBar: ProgressBar
-    private lateinit var refreshBtn: ImageView
-    private var isLoading = false
-
-    // Per-page-load guard so the video-blocking script isn't re-injected on every progress tick.
-    private var lastVideoScriptInjectedForUrl: String? = null
-
-    // File upload (issue 7)
-    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
-    private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
 
     private var blockedDomains = mutableListOf<String>()
     private var blockedKeywords = mutableListOf<String>()
@@ -80,32 +59,10 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var domainTracker: DomainTracker
 
-    /** Convert dp to px so touch targets are a consistent physical size on every screen density. */
-    private fun dp(value: Int): Int =
-        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics).toInt()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("SafeBrowserPrefs", Context.MODE_PRIVATE)
         domainTracker = DomainTracker(this)
-
-        // Must be registered before STARTED state, so do it in onCreate (issue 7: uploads/file chooser).
-        fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            val callback = fileChooserCallback
-            fileChooserCallback = null
-            if (callback == null) return@registerForActivityResult
-            val data = result.data
-            val results: Array<Uri>? = if (result.resultCode == Activity.RESULT_OK && data != null) {
-                val clipData = data.clipData
-                if (clipData != null) {
-                    Array(clipData.itemCount) { i -> clipData.getItemAt(i).uri }
-                } else {
-                    data.data?.let { arrayOf(it) }
-                }
-            } else null
-            callback.onReceiveValue(results)
-        }
-
         loadBlocklist()
         fetchBlocklist()
         setupChromeUI()
@@ -122,13 +79,13 @@ class MainActivity : AppCompatActivity() {
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#FFFFFF"))
-            elevation = dp(2).toFloat()
+            elevation = 4f
         }
 
         val topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), dp(2), dp(4), dp(2))
+            setPadding(8, 4, 8, 4)
         }
 
         tabContainer = HorizontalScrollView(this).apply {
@@ -142,10 +99,22 @@ class MainActivity : AppCompatActivity() {
         tabContainer.addView(tabLayout)
         topRow.addView(tabContainer)
 
-        val newTabBtn = createIconButton(android.R.drawable.ic_input_add) { createNewTab("https://www.google.com") }
+        val newTabBtn = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_input_add)
+            setColorFilter(Color.parseColor("#5F6368"))
+            layoutParams = LinearLayout.LayoutParams(40, 40).apply { setMargins(8, 0, 8, 0) }
+            setPadding(8, 8, 8, 8)
+            setOnClickListener { createNewTab("https://www.google.com") }
+        }
         topRow.addView(newTabBtn)
 
-        val menuBtn = createIconButton(android.R.drawable.ic_menu_more) { showMenu() }
+        val menuBtn = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_more)
+            setColorFilter(Color.parseColor("#5F6368"))
+            layoutParams = LinearLayout.LayoutParams(40, 40)
+            setPadding(8, 8, 8, 8)
+            setOnClickListener { showMenu() }
+        }
         topRow.addView(menuBtn)
 
         toolbar.addView(topRow)
@@ -153,7 +122,7 @@ class MainActivity : AppCompatActivity() {
         val addressRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6), dp(4), dp(6), dp(6))
+            setPadding(12, 6, 12, 10)
         }
 
         val backBtn = createIconButton(android.R.drawable.ic_media_previous) {
@@ -164,14 +133,8 @@ class MainActivity : AppCompatActivity() {
             getActiveWebView()?.goForward()
         }
 
-        // Doubles as Stop while a page is loading (issue 6: don't get trapped on a stalled page).
-        refreshBtn = createIconButton(android.R.drawable.ic_popup_sync) {
-            if (isLoading) {
-                getActiveWebView()?.stopLoading()
-                setLoadingState(false)
-            } else {
-                getActiveWebView()?.reload()
-            }
+        val refreshBtn = createIconButton(android.R.drawable.ic_popup_sync) {
+            getActiveWebView()?.reload()
         }
 
         val homeBtn = createIconButton(android.R.drawable.ic_menu_compass) {
@@ -181,21 +144,21 @@ class MainActivity : AppCompatActivity() {
         val addressBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(2), dp(6), dp(2))
+            setPadding(12, 6, 12, 6)
             val shape = GradientDrawable().apply {
-                cornerRadius = dp(24).toFloat()
+                cornerRadius = 48f
                 setColor(Color.parseColor("#F1F3F4"))
             }
             background = shape
-            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                setMargins(dp(4), 0, dp(4), 0)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                setMargins(8, 0, 8, 0)
             }
         }
 
         val lockIcon = ImageView(this).apply {
             setImageResource(android.R.drawable.ic_lock_idle_lock)
             setColorFilter(Color.parseColor("#5F6368"))
-            layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply { setMargins(0, 0, dp(6), 0) }
+            layoutParams = LinearLayout.LayoutParams(28, 28)
         }
         addressBar.addView(lockIcon)
 
@@ -204,45 +167,39 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(Color.TRANSPARENT)
             setTextColor(Color.parseColor("#202124"))
             setHintTextColor(Color.parseColor("#9AA0A6"))
-            textSize = 15f
+            textSize = 14f
             maxLines = 1
             isSingleLine = true
-            setPadding(dp(4), 0, dp(4), 0)
-            // issue 5: explicitly request a GO action key so the keyboard's Enter/Search button works.
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            imeOptions = EditorInfo.IME_ACTION_GO
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
-            setOnEditorActionListener { _, actionId, event ->
-                val isGoPress = actionId == EditorInfo.IME_ACTION_GO ||
-                    actionId == EditorInfo.IME_ACTION_SEARCH ||
-                    actionId == EditorInfo.IME_ACTION_DONE ||
-                    (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_ENTER && event.action == android.view.KeyEvent.ACTION_DOWN)
-                if (isGoPress) {
+            setPadding(8, 0, 8, 0)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_SEARCH) {
                     loadUrlInActiveTab(text.toString())
                     hideKeyboard()
                     true
                 } else false
             }
-            // issue 2: select-all on first tap. Doing this synchronously inside the click/focus
-            // callback can lose the race with the cursor-placement the EditText itself performs
-            // on the same tap, so we push it to the next UI loop tick instead.
             setOnFocusChangeListener { _, hasFocus ->
                 if (hasFocus) {
-                    post { selectAll() }
+                    selectAll()
                 } else {
                     hideKeyboard()
                 }
             }
             setOnClickListener {
-                if (!hasFocus()) requestFocus()
-                post { selectAll() }
+                selectAll()
             }
         }
         addressBar.addView(urlInput)
 
-        val goBtn = createIconButton(android.R.drawable.ic_menu_search, sizeDp = 36) {
-            loadUrlInActiveTab(urlInput.text.toString())
-            hideKeyboard()
+        val goBtn = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_search)
+            setColorFilter(Color.parseColor("#5F6368"))
+            layoutParams = LinearLayout.LayoutParams(36, 36)
+            setOnClickListener {
+                loadUrlInActiveTab(urlInput.text.toString())
+                hideKeyboard()
+            }
         }
         addressBar.addView(goBtn)
 
@@ -255,9 +212,8 @@ class MainActivity : AppCompatActivity() {
         toolbar.addView(addressRow)
 
         progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(3))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 3)
             visibility = View.GONE
-            isIndeterminate = false
         }
         toolbar.addView(progressBar)
 
@@ -280,25 +236,12 @@ class MainActivity : AppCompatActivity() {
         imm.hideSoftInputFromWindow(urlInput.windowToken, 0)
     }
 
-    /**
-     * issue 1: buttons were sized in raw pixels (40px/36px), which on high-density screens
-     * renders well under Android's 48dp minimum touch target -- that's why they were so hard
-     * to tap. Everything now goes through dp() and gets a visible ripple so taps register and
-     * give feedback.
-     */
-    private fun createIconButton(iconRes: Int, sizeDp: Int = 48, onClick: () -> Unit): ImageView {
-        val touchSize = dp(maxOf(sizeDp, 48)) // never shrink below the accessibility minimum
-        val iconInset = dp((maxOf(sizeDp, 48) - 24) / 2)
-        val outValue = TypedValue()
-        theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true)
+    private fun createIconButton(iconRes: Int, onClick: () -> Unit): ImageView {
         return ImageView(this).apply {
             setImageResource(iconRes)
             setColorFilter(Color.parseColor("#5F6368"))
-            layoutParams = LinearLayout.LayoutParams(touchSize, touchSize).apply { setMargins(dp(2), 0, dp(2), 0) }
-            setPadding(iconInset, iconInset, iconInset, iconInset)
-            isClickable = true
-            isFocusable = true
-            if (outValue.resourceId != 0) setBackgroundResource(outValue.resourceId)
+            layoutParams = LinearLayout.LayoutParams(40, 40).apply { setMargins(2, 0, 2, 0) }
+            setPadding(8, 8, 8, 8)
             setOnClickListener { onClick() }
         }
     }
@@ -310,7 +253,7 @@ class MainActivity : AppCompatActivity() {
         tabs.add(tabData)
         webViewContainer.addView(webView)
         switchToTab(tabId)
-        loadUrlInWebView(webView, url)
+        webView.loadUrl(url)
         updateTabUI()
     }
 
@@ -328,40 +271,15 @@ class MainActivity : AppCompatActivity() {
                 databaseEnabled = true
                 setSupportMultipleWindows(true)
                 javaScriptCanOpenWindowsAutomatically = true
-                // issue 3: allow file:// access so saved downloads can be opened back in-page if needed.
-                allowFileAccess = true
             }
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             webViewClient = SafeWebViewClient()
             webChromeClient = SafeWebChromeClient()
-            // issue 3: downloads silently did nothing because no DownloadListener was ever attached.
-            setDownloadListener { url, _, contentDisposition, mimeType, _ ->
-                startDownload(url, contentDisposition, mimeType)
-            }
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-        }
-    }
-
-    private fun startDownload(url: String, contentDisposition: String?, mimeType: String?) {
-        try {
-            val request = DownloadManager.Request(Uri.parse(url))
-            val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
-            request.setMimeType(mimeType)
-            request.addRequestHeader("User-Agent", getActiveWebView()?.settings?.userAgentString ?: "")
-            request.setDescription("Downloading file...")
-            request.setTitle(fileName)
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            dm.enqueue(request)
-            Toast.makeText(this, "Downloading $fileName", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Log.e(TAG, "Download failed", e)
-            Toast.makeText(this, "Couldn't start download", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -401,41 +319,39 @@ class MainActivity : AppCompatActivity() {
             val tabView = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), dp(6), dp(12), dp(6))
+                setPadding(12, 6, 12, 6)
                 val shape = GradientDrawable().apply {
-                    cornerRadius = dp(16).toFloat()
+                    cornerRadius = 24f
                     setColor(if (isActive) Color.parseColor("#D2E3FC") else Color.parseColor("#F1F3F4"))
                 }
                 background = shape
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
-                    dp(40)
-                ).apply { setMargins(dp(4), 0, dp(4), 0) }
-                isClickable = true
+                    56
+                ).apply { setMargins(4, 0, 4, 0) }
                 setOnClickListener { switchToTab(tab.id) }
             }
 
             val titleView = TextView(this).apply {
                 text = if (tab.title.length > 15) tab.title.substring(0, 15) + "..." else tab.title
-                textSize = 13f
+                textSize = 12f
                 setTextColor(Color.parseColor("#202124"))
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(0, 0, dp(8), 0)
+                    setMargins(0, 0, 8, 0)
                 }
             }
             tabView.addView(titleView)
 
             if (tabs.size > 1) {
                 val closeBtn = TextView(this).apply {
-                    text = "\u2715"
+                    text = "x"
                     textSize = 14f
                     setTextColor(Color.parseColor("#5F6368"))
-                    // A real touch target rather than relying on the text glyph's tiny hitbox.
-                    minWidth = dp(32)
-                    minHeight = dp(32)
-                    gravity = Gravity.CENTER
-                    isClickable = true
-                    setOnClickListener { closeTab(tab.id) }
+                    setPadding(8, 0, 8, 0)
+                    setOnClickListener {
+                        closeTab(tab.id)
+                        true
+                    }
                 }
                 tabView.addView(closeBtn)
             }
@@ -459,45 +375,14 @@ class MainActivity : AppCompatActivity() {
             input.contains(".") && !input.contains(" ") -> "https://$input"
             else -> "https://www.google.com/search?q=" + android.net.Uri.encode(input)
         }
-        val webView = getActiveWebView() ?: return
-        loadUrlInWebView(webView, url)
-    }
 
-    private fun loadUrlInWebView(webView: WebView, url: String) {
         if (isBlocked(url)) {
-            webView.loadDataWithBaseURL(null, getBlockedHtml(), "text/html", "UTF-8", null)
+            getActiveWebView()?.loadDataWithBaseURL(null, getBlockedHtml(), "text/html", "UTF-8", null)
             urlInput.setText(url)
             return
         }
-        // issue 4: show the loading indicator the instant the user acts, instead of waiting
-        // for onPageStarted, which can lag behind a tap by several seconds on a slow link
-        // (DNS lookup / TCP connect happen before that callback fires).
-        setLoadingState(true)
-        webView.loadUrl(url)
-    }
 
-    private fun setLoadingState(loading: Boolean) {
-        isLoading = loading
-        loadWatchdogRunnable?.let { handler.removeCallbacks(it) }
-        if (loading) {
-            progressBar.visibility = View.VISIBLE
-            progressBar.isIndeterminate = true
-            refreshBtn.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-            // issue 6: if a page never finishes (dead link, stalled connection), don't leave
-            // the user stuck -- auto-recover the UI so other taps work again after a timeout.
-            loadWatchdogRunnable = Runnable {
-                if (isLoading) {
-                    setLoadingState(false)
-                    Toast.makeText(this, "Taking a while - tap reload or try another link", Toast.LENGTH_SHORT).show()
-                }
-            }
-            handler.postDelayed(loadWatchdogRunnable!!, LOAD_WATCHDOG_MS)
-        } else {
-            progressBar.isIndeterminate = false
-            progressBar.progress = 0
-            progressBar.visibility = View.GONE
-            refreshBtn.setImageResource(android.R.drawable.ic_popup_sync)
-        }
+        getActiveWebView()?.loadUrl(url)
     }
 
     private fun showMenu() {
@@ -655,16 +540,12 @@ class MainActivity : AppCompatActivity() {
                 view?.loadDataWithBaseURL(null, getBlockedHtml(), "text/html", "UTF-8", null)
                 return true
             }
-            // issue 4: tapping a link inside a page doesn't go through loadUrlInWebView(),
-            // so show the indicator here too instead of waiting on onPageStarted.
-            setLoadingState(true)
             return false
         }
 
         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
             super.onPageStarted(view, url, favicon)
-            setLoadingState(true)
-            progressBar.isIndeterminate = false
+            progressBar.visibility = View.VISIBLE
             progressBar.progress = 0
             urlInput.setText(url)
             getActiveTab()?.let {
@@ -675,23 +556,19 @@ class MainActivity : AppCompatActivity() {
 
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
-            setLoadingState(false)
+            progressBar.visibility = View.GONE
+            progressBar.progress = 100
             view?.title?.let { title ->
                 getActiveTab()?.title = title
                 updateTabUI()
             }
-            if (videoBlocking && url != null && url != lastVideoScriptInjectedForUrl) {
-                lastVideoScriptInjectedForUrl = url
-                view.evaluateJavascript(getVideoBlockScript(), null)
-            }
+            if (videoBlocking) view?.evaluateJavascript(getVideoBlockScript(), null)
             url?.let { domainTracker.trackDomain(it) }
         }
 
         override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
             super.onReceivedError(view, request, error)
-            // issue 6: a failed/cancelled load used to leave the progress bar spinning forever
-            // with no way out except killing the app.
-            setLoadingState(false)
+            progressBar.visibility = View.GONE
             Log.e(TAG, "WebView error: ${error?.description}")
         }
     }
@@ -699,19 +576,9 @@ class MainActivity : AppCompatActivity() {
     inner class SafeWebChromeClient : WebChromeClient() {
         override fun onProgressChanged(view: WebView?, newProgress: Int) {
             super.onProgressChanged(view, newProgress)
-            if (isLoading) {
-                progressBar.isIndeterminate = false
-                progressBar.progress = newProgress
-            }
-            // Video-block injection now happens once in onPageFinished (and once eagerly here at
-            // the halfway point to catch sites that play media before finishing load) instead of
-            // on every single progress tick, which was spamming evaluateJavascript and causing
-            // jank on slow connections (part of issue 6).
-            if (newProgress in 50..55 && videoBlocking) {
-                val currentUrl = view?.url
-                if (currentUrl != null && currentUrl != lastVideoScriptInjectedForUrl) {
-                    view.evaluateJavascript(getVideoBlockScript(), null)
-                }
+            progressBar.progress = newProgress
+            if (newProgress > 50 && videoBlocking) {
+                view?.evaluateJavascript(getVideoBlockScript(), null)
             }
         }
 
@@ -720,29 +587,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onHideCustomView() {}
-
-        // issue 7: file uploads (e.g. "Choose File" inputs) did nothing because this was
-        // never overridden, so the WebView had no way to hand control back after a pick.
-        override fun onShowFileChooser(
-            webView: WebView?,
-            filePathCallback: ValueCallback<Array<Uri>>?,
-            fileChooserParams: FileChooserParams?
-        ): Boolean {
-            fileChooserCallback?.onReceiveValue(null)
-            fileChooserCallback = filePathCallback
-            val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                type = "*/*"
-                addCategory(Intent.CATEGORY_OPENABLE)
-            }
-            return try {
-                fileChooserLauncher.launch(intent)
-                true
-            } catch (e: Exception) {
-                Log.e(TAG, "Could not open file chooser", e)
-                fileChooserCallback = null
-                false
-            }
-        }
     }
 
     override fun onBackPressed() {
@@ -757,7 +601,6 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         refreshRunnable?.let { handler.removeCallbacks(it) }
-        loadWatchdogRunnable?.let { handler.removeCallbacks(it) }
         executor.shutdown()
     }
 }
