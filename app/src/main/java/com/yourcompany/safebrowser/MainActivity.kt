@@ -10,13 +10,11 @@ import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.*
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import com.google.gson.Gson
 import java.net.HttpURLConnection
 import java.net.URL
@@ -27,7 +25,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "SafeBrowser"
-        private const val REMOTE_CONFIG_URL = "https://yourserver.com/blocklist.json"
+        private const val REMOTE_CONFIG_URL = "https://a.proxybotkk.workers.dev"
         private const val REFRESH_INTERVAL_MS = 30 * 60 * 1000L
     }
 
@@ -138,7 +136,7 @@ class MainActivity : AppCompatActivity() {
             getActiveWebView()?.reload()
         }
 
-        val homeBtn = createIconButton(android.R.drawable.ic_menu_home) {
+        val homeBtn = createIconButton(android.R.drawable.ic_menu_compass) {
             loadUrlInActiveTab("https://www.google.com")
         }
 
@@ -269,12 +267,12 @@ class MainActivity : AppCompatActivity() {
                 displayZoomControls = false
                 useWideViewPort = true
                 loadWithOverviewMode = true
-                cookieManager.setAcceptCookie(true)
-                cookieManager.setAcceptThirdPartyCookies(this, true)
                 databaseEnabled = true
                 setSupportMultipleWindows(true)
                 javaScriptCanOpenWindowsAutomatically = true
             }
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             webViewClient = SafeWebViewClient()
             webChromeClient = SafeWebChromeClient()
             layoutParams = FrameLayout.LayoutParams(
@@ -476,7 +474,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun getBlockedHtml(): String {
-        return "<html><head><title>Access Blocked</title><style>body{font-family:Arial,sans-serif;text-align:center;padding-top:100px;background:#f5f5f5;}.block-icon{font-size:80px;color:#d32f2f;}h1{color:#d32f2f;}p{color:#666;font-size:18px;}.back-link{display:inline-block;margin-top:30px;padding:12px 24px;background:#1976d2;color:white;text-decoration:none;border-radius:4px;}</style></head><body><div class=\\\"block-icon\\\">&#128683;</div><h1>Access Blocked</h1><p>This website or content has been blocked by your administrator.</p><a href=\\\"https://www.google.com\\\" class=\\\"back-link\\\">Go back to Google</a></body></html>"
+        return "<html><head><title>Access Blocked</title><style>body{font-family:Arial,sans-serif;text-align:center;padding-top:100px;background:#f5f5f5;}.block-icon{font-size:80px;color:#d32f2f;}h1{color:#d32f2f;}p{color:#666;font-size:18px;}.back-link{display:inline-block;margin-top:30px;padding:12px 24px;background:#1976d2;color:white;text-decoration:none;border-radius:4px;}</style></head><body><div class=\"block-icon\">&#128683;</div><h1>Access Blocked</h1><p>This website or content has been blocked by your administrator.</p><a href=\"https://www.google.com\" class=\"back-link\">Go back to Google</a></body></html>"
     }
 
     private fun getVideoBlockScript(): String {
@@ -493,7 +491,7 @@ class MainActivity : AppCompatActivity() {
                             f.src = "about:blank"; f.remove();
                         }
                     });
-                    var selectors = ["[class*=\\\"video\\\"]","[class*=\\\"player\\\"]","[class*=\\\"stream\\\"]","[id*=\\\"video\\\"]","[id*=\\\"player\\\"]","[id*=\\\"stream\\\"]",".ytp-player",".html5-video-player",".video-js",".jwplayer",".plyr",".mejs__container"];
+                    var selectors = ["[class*=\"video\"]","[class*=\"player\"]","[class*=\"stream\"]","[id*=\"video\"]","[id*=\"player\"]","[id*=\"stream\"]",".ytp-player",".html5-video-player",".video-js",".jwplayer",".plyr",".mejs__container"];
                     selectors.forEach(function(sel) { document.querySelectorAll(sel).forEach(function(el) { el.style.display = "none"; }); });
                 }
                 killVideos();

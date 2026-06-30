@@ -34,7 +34,7 @@ class DomainTracker(context: Context) {
                 trackedDomains.add(domain)
                 pendingUploads.add(domain)
                 saveDomains()
-                Log.d(TAG, "New domain tracked: $domain")
+                Log.d(TAG, "New domain tracked: " + domain)
                 if (pendingUploads.size >= BATCH_SIZE) {
                     uploadDomains()
                 }
@@ -81,7 +81,7 @@ class DomainTracker(context: Context) {
                 if (responseCode in 200..299) {
                     Log.d(TAG, "Uploaded " + toUpload.size + " domains successfully")
                 } else {
-                    Log.w(TAG, "Upload failed with code: $responseCode")
+                    Log.w(TAG, "Upload failed with code: " + responseCode)
                     synchronized(pendingUploads) {
                         pendingUploads.addAll(toUpload)
                     }
@@ -99,22 +99,15 @@ class DomainTracker(context: Context) {
         val deviceId = prefs.getString("device_id", "unknown") ?: "unknown"
         val timestamp = System.currentTimeMillis()
         val sb = StringBuilder()
-        sb.append("{
-")
-        sb.append("  "device_id": "$deviceId",
-")
-        sb.append("  "timestamp": $timestamp,
-")
-        sb.append("  "domains": [
-")
-        domains.forEachIndexed { index, domain ->
-            sb.append("    "$domain"")
-            if (index < domains.size - 1) sb.append(",")
-            sb.append("
-")
+        sb.append("{")
+        sb.append(""device_id": "").append(deviceId).append("",")
+        sb.append(""timestamp": ").append(timestamp).append(",")
+        sb.append(""domains": [")
+        for (i in domains.indices) {
+            sb.append(""").append(domains[i]).append(""")
+            if (i < domains.size - 1) sb.append(",")
         }
-        sb.append("  ]
-")
+        sb.append("]")
         sb.append("}")
         return sb.toString()
     }
