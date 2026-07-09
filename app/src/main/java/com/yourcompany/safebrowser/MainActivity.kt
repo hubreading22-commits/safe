@@ -249,27 +249,54 @@ class MainActivity : AppCompatActivity() {
                 <title>New Tab</title>
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <style>
-                    body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; background: #fff; }
-                    h1 { color: #202124; font-size: 48px; font-weight: normal; margin-bottom: 24px; }
-                    .search-box { display: flex; align-items: center; width: 90%; max-width: 600px; padding: 12px 24px; border-radius: 24px; border: 1px solid #dfe1e5; box-shadow: 0 1px 6px rgba(32,33,36,0.28); }
-                    input { flex: 1; border: none; outline: none; font-size: 16px; margin-left: 12px; }
-                    .shortcuts { display: flex; gap: 32px; margin-top: 48px; }
-                    .shortcut { display: flex; flex-direction: column; align-items: center; text-decoration: none; color: #3C4043; font-size: 14px; }
-                    .shortcut-icon { width: 48px; height: 48px; border-radius: 50%; background: #F1F3F4; display: flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 12px; }
+                    body { 
+                        display: flex; flex-direction: column; align-items: center; 
+                        min-height: 100vh; margin: 0; padding-top: 64px;
+                        font-family: 'Google Sans', Roboto, Arial, sans-serif; 
+                        background: #F1F3F4; /* Soft Material gray */
+                    }
+                    .logo-container { margin-bottom: 32px; }
+                    .search-box { 
+                        display: flex; align-items: center; width: 85%; max-width: 600px; 
+                        padding: 14px 24px; border-radius: 30px; 
+                        background: #FFFFFF; border: none;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.04);
+                    }
+                    input { 
+                        flex: 1; border: none; outline: none; font-size: 16px; 
+                        margin-left: 12px; color: #3C4043; background: transparent;
+                    }
+                    input::placeholder { color: #5F6368; }
+                    .shortcuts-card {
+                        display: flex; gap: 24px; padding: 24px 32px; margin-top: 32px;
+                        background: #FFFFFF; border-radius: 24px;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+                        overflow-x: auto; max-width: 90%;
+                    }
+                    .shortcut { 
+                        display: flex; flex-direction: column; align-items: center; 
+                        text-decoration: none; color: #5F6368; font-size: 12px; font-weight: 500;
+                        min-width: 64px;
+                    }
+                    .shortcut-icon { 
+                        width: 48px; height: 48px; border-radius: 50%; 
+                        background: #F1F3F4; display: flex; align-items: center; justify-content: center; 
+                        font-size: 20px; margin-bottom: 8px; color: #202124;
+                    }
                     .shortcut:hover .shortcut-icon { background: #E8EAED; }
                 </style>
             </head>
             <body>
-                <img src="${getAppLogoBase64()}" style="width: 120px; height: 120px; margin-bottom: 24px;" alt="Chromia">
+                <div class="logo-container">
+                    <img src="${getAppLogoBase64()}" style="width: 100px; height: 100px; border-radius: 20px;" alt="Chromia">
+                </div>
                 <div class="search-box">
-                    <svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="#9aa0a6"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg>
-                    <form action="safebrowser://search" method="GET" style="flex:1; display:flex;">
+                    <svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="#5F6368"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg>
+                    <form action="https://www.google.com/search" method="GET" style="flex:1; display:flex;">
                         <input type="text" name="q" placeholder="Search the web" autocomplete="off" autofocus>
                     </form>
                 </div>
-                <div class="shortcuts">
-                    $shortcutsHtml
-                </div>
+                ${if (shortcutsHtml.isNotBlank()) "<div class=\"shortcuts-card\">\n$shortcutsHtml\n</div>" else ""}
             </body>
             </html>
         """.trimIndent()
@@ -374,9 +401,6 @@ class MainActivity : AppCompatActivity() {
         tabContainer.addView(tabLayout)
         topRow.addView(tabContainer)
 
-        val newTabBtn = createIconButton(R.drawable.ic_add) { createNewTab("safebrowser://ntp") }
-        topRow.addView(newTabBtn)
-
         toolbar.addView(topRow)
 
         addressRow = LinearLayout(this).apply {
@@ -415,7 +439,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val homeBtn = createIconButton(R.drawable.ic_home) {
-            createNewTab("safebrowser://ntp")
+            getActiveWebView()?.let { loadUrlInWebView(it, "safebrowser://ntp") }
         }
 
         val addressBar = LinearLayout(this).apply {
@@ -818,11 +842,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (tab.favicon != null) {
                     setImageBitmap(tab.favicon)
+                    visibility = View.VISIBLE
+                } else if (tab.title == "New Tab") {
+                    // Chrome typically hides the icon or uses a faint globe/search for the NTP
+                    // Hiding it entirely looks much cleaner than a generic house icon.
+                    visibility = View.GONE
                 } else {
-                    // Generic placeholder while the real favicon hasn't arrived yet (or the
-                    // site doesn't have one) instead of leaving a blank gap in the tab pill.
-                    setImageResource(R.drawable.ic_home)
+                    setImageResource(android.R.drawable.ic_menu_search)
                     setColorFilter(Color.parseColor("#9AA0A6"))
+                    visibility = View.VISIBLE
                 }
             }
             tabView.addView(faviconView)
@@ -852,6 +880,9 @@ class MainActivity : AppCompatActivity() {
 
             tabLayout.addView(tabView)
         }
+
+        val newTabBtn = createIconButton(R.drawable.ic_add, sizeDp = 36) { createNewTab("safebrowser://ntp") }
+        tabLayout.addView(newTabBtn)
 
         tabLayout.post {
             val activeIndex = tabs.indexOfFirst { it.id == activeTabId }
