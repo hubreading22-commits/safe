@@ -83,7 +83,7 @@ class MainActivity : AppCompatActivity() {
     private var blockedDomains = mutableListOf<String>()
     private var blockedKeywords = mutableListOf<String>()
     private var videoBlocking = true
-    private var audioBlocking = false
+    private var audioBlocking = true
     private val videoExtensions = listOf(".mp4", ".webm", ".m3u8", ".ts", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".3gp", ".mpd", ".m4v", ".f4v")
     private val audioExtensions = listOf(".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".mka", ".opus")
     private val fallbackBlockedDomains = listOf(
@@ -253,20 +253,20 @@ class MainActivity : AppCompatActivity() {
                         display: flex; flex-direction: column; align-items: center; 
                         min-height: 100vh; margin: 0; padding-top: 64px;
                         font-family: 'Google Sans', Roboto, Arial, sans-serif; 
-                        background: #F1F3F4; /* Soft Material gray */
+                        background: #F0F4F9; /* Material 3 Cool Background */
                     }
                     .logo-container { margin-bottom: 32px; }
                     .search-box { 
                         display: flex; align-items: center; width: 85%; max-width: 600px; 
                         padding: 14px 24px; border-radius: 30px; 
                         background: #FFFFFF; border: none;
-                        box-shadow: 0 2px 5px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.04);
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
                     }
                     input { 
                         flex: 1; border: none; outline: none; font-size: 16px; 
-                        margin-left: 12px; color: #3C4043; background: transparent;
+                        margin-left: 12px; color: #1F1F1F; background: transparent;
                     }
-                    input::placeholder { color: #5F6368; }
+                    input::placeholder { color: #444746; }
                     .shortcuts-card {
                         display: flex; gap: 24px; padding: 24px 32px; margin-top: 32px;
                         background: #FFFFFF; border-radius: 24px;
@@ -275,15 +275,15 @@ class MainActivity : AppCompatActivity() {
                     }
                     .shortcut { 
                         display: flex; flex-direction: column; align-items: center; 
-                        text-decoration: none; color: #5F6368; font-size: 12px; font-weight: 500;
+                        text-decoration: none; color: #444746; font-size: 12px; font-weight: 500;
                         min-width: 64px;
                     }
                     .shortcut-icon { 
                         width: 48px; height: 48px; border-radius: 50%; 
-                        background: #F1F3F4; display: flex; align-items: center; justify-content: center; 
-                        font-size: 20px; margin-bottom: 8px; color: #202124;
+                        background: #F0F4F9; display: flex; align-items: center; justify-content: center; 
+                        font-size: 20px; margin-bottom: 8px; color: #1F1F1F;
                     }
-                    .shortcut:hover .shortcut-icon { background: #E8EAED; }
+                    .shortcut:hover .shortcut-icon { background: #E3E8EF; }
                 </style>
             </head>
             <body>
@@ -384,7 +384,7 @@ class MainActivity : AppCompatActivity() {
         val topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#DEE1E6"))
+            setBackgroundColor(Color.parseColor("#E3E8EF")) // Material 3 Cool Tab Strip
             setPadding(dp(8), dp(8), dp(8), 0)
         }
 
@@ -448,7 +448,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(2), dp(12), dp(2))
             val shape = GradientDrawable().apply {
                 cornerRadius = dp(24).toFloat()
-                setColor(Color.parseColor("#F1F3F4"))
+                setColor(Color.parseColor("#F0F4F9"))
             }
             background = shape
             layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply {
@@ -458,7 +458,7 @@ class MainActivity : AppCompatActivity() {
 
         val lockIcon = ImageView(this).apply {
             setImageResource(R.drawable.ic_lock)
-            setColorFilter(Color.parseColor("#5F6368"))
+            setColorFilter(Color.parseColor("#444746"))
             layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { setMargins(0, 0, dp(8), 0) }
         }
         addressBar.addView(lockIcon)
@@ -469,8 +469,8 @@ class MainActivity : AppCompatActivity() {
         urlInput = EditText(this).apply {
             hint = "Search or type URL"
             setBackgroundColor(Color.TRANSPARENT)
-            setTextColor(Color.parseColor("#202124"))
-            setHintTextColor(Color.parseColor("#9AA0A6"))
+            setTextColor(Color.parseColor("#1F1F1F"))
+            setHintTextColor(Color.parseColor("#444746"))
             textSize = 16f
             maxLines = 1
             isSingleLine = true
@@ -643,7 +643,7 @@ class MainActivity : AppCompatActivity() {
         theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true)
         return ImageView(this).apply {
             setImageResource(iconRes)
-            setColorFilter(Color.parseColor("#5F6368"))
+            setColorFilter(Color.parseColor("#444746")) // Material 3 dark gray icons
             layoutParams = LinearLayout.LayoutParams(touchSize, touchSize).apply { setMargins(dp(2), 0, dp(2), 0) }
             setPadding(iconInset, iconInset, iconInset, iconInset)
             isClickable = true
@@ -858,7 +858,7 @@ class MainActivity : AppCompatActivity() {
             val titleView = TextView(this).apply {
                 text = if (tab.title.length > 15) tab.title.substring(0, 15) + "..." else tab.title
                 textSize = 13f
-                setTextColor(Color.parseColor("#202124"))
+                setTextColor(Color.parseColor(if (isActive) "#1F1F1F" else "#444746"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(0, 0, dp(8), 0)
                 }
@@ -868,7 +868,7 @@ class MainActivity : AppCompatActivity() {
             val closeBtn = TextView(this).apply {
                 text = "\u2715"
                 textSize = 14f
-                setTextColor(Color.parseColor("#5F6368"))
+                setTextColor(Color.parseColor(if (isActive) "#444746" else "#74777F"))
                 // A real touch target rather than relying on the text glyph's tiny hitbox.
                 minWidth = dp(32)
                 minHeight = dp(32)
