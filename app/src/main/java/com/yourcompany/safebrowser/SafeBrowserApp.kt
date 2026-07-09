@@ -91,6 +91,5 @@ class SafeBrowserApp : Application() {
             Log.e(TAG, "Failed clearing WebView cache/history", e)
         }
         getSharedPreferences("SafeBrowserPrefs", Context.MODE_PRIVATE).edit().clear().apply()
-        DownloadStore(this).clear()
     }
 }

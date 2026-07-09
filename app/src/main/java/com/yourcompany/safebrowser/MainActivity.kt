@@ -494,7 +494,6 @@ class MainActivity : AppCompatActivity() {
             }
             setOnClickListener {
                 if (!hasFocus()) requestFocus()
-                post { selectAll() }
             }
         }
         addressBar.addView(urlInput)
@@ -851,7 +850,9 @@ class MainActivity : AppCompatActivity() {
             tabView.addView(faviconView)
 
             val titleView = TextView(this).apply {
-                text = if (tab.title.length > 15) tab.title.substring(0, 15) + "..." else tab.title
+                text = tab.title
+                setSingleLine(true)
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 textSize = 13f
                 includeFontPadding = false
                 setTextColor(Color.parseColor(if (isActive) "#202124" else "#5F6368"))
