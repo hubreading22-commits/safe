@@ -284,6 +284,44 @@ class MainActivity : AppCompatActivity() {
                         font-size: 20px; margin-bottom: 8px; color: #1F1F1F;
                     }
                     .shortcut:hover .shortcut-icon { background: #E3E8EF; }
+
+                    /* Discover Feed Styles */
+                    .discover-container {
+                        width: 90%; max-width: 800px; margin-top: 48px; padding-bottom: 48px;
+                    }
+                    .discover-title {
+                        font-size: 16px; color: #444746; font-weight: 500; margin-bottom: 16px; padding-left: 8px;
+                    }
+                    .discover-grid {
+                        display: grid; gap: 16px;
+                        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+                    }
+                    .card {
+                        background: #FFFFFF; border-radius: 16px; overflow: hidden;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+                        text-decoration: none; display: flex; flex-direction: column;
+                        transition: box-shadow 0.2s;
+                    }
+                    .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+                    .card-img {
+                        width: 100%; height: 140px; object-fit: cover; background: #E3E8EF;
+                    }
+                    .card-content {
+                        padding: 16px; display: flex; flex-direction: column; flex: 1;
+                    }
+                    .card-title {
+                        font-size: 14px; color: #1F1F1F; font-weight: 500; line-height: 1.4; margin: 0 0 12px 0;
+                    }
+                    .card-footer {
+                        display: flex; align-items: center; margin-top: auto;
+                    }
+                    .card-source-icon {
+                        width: 16px; height: 16px; border-radius: 4px; margin-right: 8px; background: #E3E8EF;
+                        display: flex; align-items: center; justify-content: center; font-size: 10px;
+                    }
+                    .card-source-text {
+                        font-size: 11px; color: #5F6368;
+                    }
                 </style>
             </head>
             <body>
@@ -297,6 +335,52 @@ class MainActivity : AppCompatActivity() {
                     </form>
                 </div>
                 ${if (shortcutsHtml.isNotBlank()) "<div class=\"shortcuts-card\">\n$shortcutsHtml\n</div>" else ""}
+                
+                <div class="discover-container">
+                    <div class="discover-title">Discover \u2022 Educational</div>
+                    <div class="discover-grid">
+                        <a href="https://www.nasa.gov/" class="card">
+                            <img class="card-img" src="https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=400&q=80" alt="Space">
+                            <div class="card-content">
+                                <h3 class="card-title">James Webb Telescope captures stunning new view of deep space</h3>
+                                <div class="card-footer">
+                                    <div class="card-source-icon">🚀</div>
+                                    <span class="card-source-text">NASA Daily</span>
+                                </div>
+                            </div>
+                        </a>
+                        <a href="https://www.khanacademy.org/" class="card">
+                            <img class="card-img" src="https://images.unsplash.com/photo-1509228468518-180dd4864904?w=400&q=80" alt="Math">
+                            <div class="card-content">
+                                <h3 class="card-title">The Mathematics Behind Black Holes: A Beginner's Guide</h3>
+                                <div class="card-footer">
+                                    <div class="card-source-icon">📚</div>
+                                    <span class="card-source-text">Khan Academy</span>
+                                </div>
+                            </div>
+                        </a>
+                        <a href="https://www.nationalgeographic.com/" class="card">
+                            <img class="card-img" src="https://images.unsplash.com/photo-1682687982501-1e58f81012f9?w=400&q=80" alt="Ocean">
+                            <div class="card-content">
+                                <h3 class="card-title">Deep Ocean Exploration: Discovering New Bioluminescent Species</h3>
+                                <div class="card-footer">
+                                    <div class="card-source-icon">🌊</div>
+                                    <span class="card-source-text">NatGeo Science</span>
+                                </div>
+                            </div>
+                        </a>
+                        <a href="https://www.history.com/" class="card">
+                            <img class="card-img" src="https://images.unsplash.com/photo-1552832233-9f048ebc9213?w=400&q=80" alt="Rome">
+                            <div class="card-content">
+                                <h3 class="card-title">The Architectural Marvel of the Roman Colosseum</h3>
+                                <div class="card-footer">
+                                    <div class="card-source-icon">🏛️</div>
+                                    <span class="card-source-text">History Channel</span>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                </div>
             </body>
             </html>
         """.trimIndent()
