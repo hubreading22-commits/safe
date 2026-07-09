@@ -1,0 +1,180 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chromia Full Preview</title>
+<style>
+    body {
+        margin: 0;
+        padding: 0;
+        background: #D0D0D0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        font-family: 'Google Sans', Roboto, Arial, sans-serif;
+    }
+    
+    /* Device Mockup */
+    .device {
+        width: 1024px;
+        height: 768px;
+        background: #F0F0F8; /* NTP Background */
+        border: 16px solid #202124;
+        border-radius: 32px;
+        box-shadow: 0 24px 48px rgba(0,0,0,0.2);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+    }
+
+    /* Tab Strip */
+    .tab-strip {
+        height: 48px;
+        background: #E8E7EF;
+        display: flex;
+        align-items: flex-end;
+        padding: 8px 8px 0 8px;
+    }
+    
+    .tab {
+        height: 44px;
+        width: 220px;
+        background: #FFFFFF;
+        border-radius: 12px 12px 0 0;
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        box-sizing: border-box;
+        position: relative;
+        margin-right: 4px;
+    }
+    
+    .tab-title {
+        font-size: 13px;
+        color: #1F1F1F;
+        flex: 1;
+    }
+    
+    .tab-close {
+        color: #5F6368;
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+    .new-tab-btn {
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #5F6368;
+        font-size: 24px;
+        margin-bottom: 4px;
+        cursor: pointer;
+    }
+
+    /* Toolbar */
+    .toolbar {
+        height: 56px;
+        background: #FFFFFF;
+        display: flex;
+        align-items: center;
+        padding: 4px 8px;
+        box-shadow: 0 4px 4px -4px rgba(0,0,0,0.1);
+        z-index: 10;
+    }
+    
+    .nav-btn {
+        width: 48px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #5F6368;
+        font-size: 20px;
+    }
+    
+    .address-bar {
+        flex: 1;
+        height: 48px;
+        background: #F0F0F8;
+        border-radius: 24px;
+        margin: 0 8px;
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+    }
+    
+    .address-icon {
+        color: #5F6368;
+        margin-right: 8px;
+        font-size: 14px;
+    }
+    
+    .address-text {
+        font-size: 16px;
+        color: #202124;
+    }
+    
+    /* NTP Content Area */
+    .ntp-content {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-top: 48px;
+        background: #F0F0F8;
+    }
+    
+    
+                    body { display: flex; flex-direction: column; padding: 10%; margin: 0; font-family: sans-serif; background: #fff; color: #5F6368; }
+                    h2 { color: #202124; margin-top: 40px; }
+                    .icon { font-size: 64px; }
+                
+    
+</style>
+</head>
+<body>
+
+<div class="device">
+    <!-- Tab Strip -->
+    <div class="tab-strip">
+        <div class="tab">
+            <span class="tab-title">New Tab</span>
+            <span class="tab-close">✕</span>
+        </div>
+        <div class="new-tab-btn">+</div>
+    </div>
+    
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <div class="nav-btn">←</div>
+        <div class="nav-btn">→</div>
+        <div class="nav-btn">↻</div>
+        <div class="nav-btn">⌂</div>
+        <div class="address-bar">
+            <span class="address-icon">🔒</span>
+            <span class="address-text">Search or type URL</span>
+        </div>
+        <div class="nav-btn">⋮</div>
+    </div>
+    
+    <!-- NTP Body -->
+    <div class="ntp-content">
+        
+            
+                <div class="icon">🦖</div>
+                <h2>This site can't be reached</h2>
+                <p>ERR_NAME_NOT_RESOLVED ($description)</p>
+            
+        
+    </div>
+</div>
+
+</body>
+</html>

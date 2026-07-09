@@ -253,14 +253,14 @@ class MainActivity : AppCompatActivity() {
                         display: flex; flex-direction: column; align-items: center; 
                         min-height: 100vh; margin: 0; padding-top: 48px;
                         font-family: 'Google Sans', Roboto, Arial, sans-serif; 
-                        background: #E8E7EF;
+                        background: #F0F0F8; /* Lightened airy background */
                     }
                     .logo-container { margin-bottom: 24px; }
                     .search-box { 
                         display: flex; align-items: center; width: 85%; max-width: 600px; 
                         padding: 14px 24px; border-radius: 30px; 
-                        background: #E8E7EF; border: none;
-                        box-shadow: none;
+                        background: #FFFFFF; border: none;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
                     }
                     input { 
                         flex: 1; border: none; outline: none; font-size: 16px; 
@@ -280,10 +280,10 @@ class MainActivity : AppCompatActivity() {
                     }
                     .shortcut-icon { 
                         width: 48px; height: 48px; border-radius: 16px; 
-                        background: #E8E7EF; display: flex; align-items: center; justify-content: center; 
+                        background: #F0F0F8; display: flex; align-items: center; justify-content: center; 
                         font-size: 20px; margin-bottom: 8px; color: #202124;
                     }
-                    .shortcut:hover .shortcut-icon { background: #E3E2E9; }
+                    .shortcut:hover .shortcut-icon { background: #E8E7EF; }
 
                     /* Discover Feed Styles */
                     .discover-container {
@@ -304,7 +304,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
                     .card-img {
-                        width: 100%; height: 140px; object-fit: cover; background: #E3E8EF;
+                        width: 100%; height: 140px; object-fit: cover; background: #F0F0F8;
                     }
                     .card-content {
                         padding: 16px; display: flex; flex-direction: column; flex: 1;
@@ -316,7 +316,7 @@ class MainActivity : AppCompatActivity() {
                         display: flex; align-items: center; margin-top: auto;
                     }
                     .card-source-icon {
-                        width: 16px; height: 16px; border-radius: 4px; margin-right: 8px; background: #E3E8EF;
+                        width: 16px; height: 16px; border-radius: 4px; margin-right: 8px; background: #F0F0F8;
                         display: flex; align-items: center; justify-content: center; font-size: 10px;
                     }
                     .card-source-text {
@@ -333,14 +333,6 @@ class MainActivity : AppCompatActivity() {
                     <form action="https://www.google.com/search" method="GET" style="flex:1; display:flex;">
                         <input type="text" name="q" placeholder="Search the web" autocomplete="off" autofocus>
                     </form>
-                </div>
-                <div style="display: flex; gap: 16px; margin-top: 16px; width: 85%; max-width: 600px;">
-                    <button style="flex: 1; padding: 12px; border-radius: 20px; border: none; background: #E8E7EF; color: #202124; font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-                        <span style="margin-right: 8px; font-size: 16px;">✨</span> AI Mode
-                    </button>
-                    <button style="flex: 1; padding: 12px; border-radius: 20px; border: none; background: #E8E7EF; color: #202124; font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
-                        <span style="margin-right: 8px; font-size: 16px;">🕵️</span> Incognito
-                    </button>
                 </div>
                 ${if (shortcutsHtml.isNotBlank()) "<div class=\"shortcuts-card\">\n$shortcutsHtml\n</div>" else ""}
                 
@@ -469,14 +461,14 @@ class MainActivity : AppCompatActivity() {
 
         toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#E3E2E9"))
+            setBackgroundColor(Color.parseColor("#FFFFFF")) // special white for toolbar
             elevation = dp(4).toFloat()
         }
 
         val topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#E3E2E9"))
+            setBackgroundColor(Color.parseColor("#E8E7EF")) // lightened gray for top
             setPadding(dp(8), dp(8), dp(8), 0)
         }
 
@@ -540,7 +532,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(2), dp(12), dp(2))
             val shape = GradientDrawable().apply {
                 cornerRadius = dp(24).toFloat()
-                setColor(Color.parseColor("#E8E7EF"))
+                setColor(Color.parseColor("#F0F0F8")) // lightened pill inside white toolbar
             }
             background = shape
             layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply {
@@ -911,7 +903,7 @@ class MainActivity : AppCompatActivity() {
                 val shape = GradientDrawable().apply {
                     val radius = dp(12).toFloat()
                     cornerRadii = floatArrayOf(radius, radius, radius, radius, 0f, 0f, 0f, 0f)
-                    setColor(if (isActive) Color.parseColor("#E3E2E9") else Color.TRANSPARENT)
+                    setColor(if (isActive) Color.parseColor("#FFFFFF") else Color.TRANSPARENT)
                 }
                 background = shape
                 layoutParams = LinearLayout.LayoutParams(
