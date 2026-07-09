@@ -58,16 +58,7 @@ class SafeBrowserApp : Application() {
 
             override fun onActivityStopped(activity: Activity) {
                 startedActivityCount--
-                if (startedActivityCount <= 0) {
-                    val wipe = Runnable {
-                        if (startedActivityCount <= 0) {
-                            Log.d(TAG, "App backgrounded with no foreground activity; clearing browsing data")
-                            clearBrowsingData()
-                        }
-                    }
-                    pendingWipe = wipe
-                    handler.postDelayed(wipe, BACKGROUND_WIPE_DELAY_MS)
-                }
+                // Background wipe logic removed per user request
             }
 
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}

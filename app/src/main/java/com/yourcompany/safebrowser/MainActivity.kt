@@ -71,9 +71,7 @@ class MainActivity : AppCompatActivity() {
     private var progressShowRunnable: Runnable? = null
     private lateinit var toolbar: LinearLayout
     private lateinit var addressRow: LinearLayout
-    private var currentThemeColor = Color.parseColor("#FFFFFF")
-    private var themeColorAnimator: android.animation.ValueAnimator? = null
-
+        
     // Per-page-load guard so the video-blocking script isn't re-injected on every progress tick.
     private var lastVideoScriptInjectedForUrl: String? = null
 
@@ -99,21 +97,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var downloadStore: DownloadStore
 
     inner class ThemeColorInterface {
-        @android.webkit.JavascriptInterface
-        fun onThemeColor(colorString: String?, tabId: Int) {
-            if (colorString == null) return
-            handler.post {
-                val tab = tabs.find { it.id == tabId }
-                if (tab != null) {
-                    try {
-                        tab.themeColor = Color.parseColor(colorString)
-                        if (activeTabId == tabId) {
-                            applyThemeColor(tab.themeColor)
-                        }
-                    } catch (e: Exception) {}
-                }
-            }
-        }
+        
 
         @android.webkit.JavascriptInterface
         fun requestUnblock(domain: String) {
@@ -162,24 +146,7 @@ class MainActivity : AppCompatActivity() {
         fun isAudioBlocked(): Boolean = audioBlocking
     }
 
-    private fun applyThemeColor(targetColor: Int) {
-        if (currentThemeColor == targetColor) return
-        themeColorAnimator?.cancel()
-        themeColorAnimator = android.animation.ValueAnimator.ofObject(
-            android.animation.ArgbEvaluator(),
-            currentThemeColor,
-            targetColor
-        ).apply {
-            duration = 300
-            addUpdateListener { animator ->
-                val color = animator.animatedValue as Int
-                toolbar.setBackgroundColor(color)
-                addressRow.setBackgroundColor(color)
-                currentThemeColor = color
-            }
-            start()
-        }
-    }
+    
 
     private fun getErrorHtml(errorCode: Int, description: String): String {
         return """
@@ -266,7 +233,7 @@ class MainActivity : AppCompatActivity() {
                 <style>
                     body { 
                         display: flex; flex-direction: column; align-items: center; 
-                        min-height: 100vh; margin: 0; padding-top: 48px;
+                        min-height: 100vh; overflow: hidden; margin: 0; padding-top: 48px;
                         font-family: 'Google Sans', Roboto, Arial, sans-serif; 
                         background: #F0F0F8; /* Lightened airy background */
                     }
@@ -323,6 +290,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Match the system status bar to the tab strip background for a cohesive top look
+        window.statusBarColor = Color.parseColor("#E8E7EF")
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+
         prefs = getSharedPreferences("SafeBrowserPrefs", Context.MODE_PRIVATE)
         // issue: the blocklist cache used to live in "SafeBrowserPrefs", which
         // SafeBrowserApp.clearBrowsingData() wipes on every full app close (by design, for
@@ -545,6 +518,7 @@ class MainActivity : AppCompatActivity() {
         rootLayout.addView(toolbar)
 
         swipeRefreshLayout = androidx.swiperefreshlayout.widget.SwipeRefreshLayout(this).apply {
+            isEnabled = false // Disabled to prevent blocking scroll to top
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -715,6 +689,12 @@ class MainActivity : AppCompatActivity() {
             webChromeClient = SafeWebChromeClient()
             // issue 3: downloads silently did nothing because no DownloadListener was ever attached.
             setDownloadListener { url, _, contentDisposition, mimeType, _ ->
+                val tab = findTabFor(this)
+                val isGhostTab = tab != null && copyBackForwardList().size == 0 && (this.url.isNullOrBlank() || this.url == "about:blank" || this.url == url)
+                
+                if (isGhostTab && tab != null) {
+                    closeTab(tab.id)
+                }
                 startDownload(url, contentDisposition, mimeType)
             }
             // Stronger video blocking: the old approach injected JS after onPageFinished /
@@ -873,6 +853,7 @@ class MainActivity : AppCompatActivity() {
             val titleView = TextView(this).apply {
                 text = if (tab.title.length > 15) tab.title.substring(0, 15) + "..." else tab.title
                 textSize = 13f
+                includeFontPadding = false
                 setTextColor(Color.parseColor(if (isActive) "#202124" else "#5F6368"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(0, 0, dp(8), 0)
@@ -1418,6 +1399,7 @@ class MainActivity : AppCompatActivity() {
 
         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
             val url = request?.url.toString()
+            
             if (url.startsWith("safebrowser://search?q=")) {
                 val query = Uri.parse(url).getQueryParameter("q") ?: ""
                 view?.loadUrl("https://www.google.com/search?q=" + android.net.Uri.encode(query))
@@ -1455,17 +1437,7 @@ class MainActivity : AppCompatActivity() {
             super.onPageFinished(view, url)
             val tab = findTabFor(view) ?: return
             
-            view?.evaluateJavascript("""
-                (function() {
-                    var meta = document.querySelector('meta[name="theme-color"]');
-                    if (meta && meta.content) {
-                        AndroidTheme.onThemeColor(meta.content, ${tab.id});
-                    } else {
-                        AndroidTheme.onThemeColor('#FFFFFF', ${tab.id});
-                    }
-                })();
-            """.trimIndent(), null)
-
+            
             tab.isLoading = false
             view?.title?.let { title -> tab.title = title }
             updateTabUI()
