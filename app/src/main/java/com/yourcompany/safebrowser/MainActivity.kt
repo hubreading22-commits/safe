@@ -191,9 +191,14 @@ class MainActivity : AppCompatActivity() {
             val type = object : com.google.gson.reflect.TypeToken<List<Shortcut>>() {}.type
             val shortcuts: List<Shortcut> = gson.fromJson(jsonString, type)
             for (shortcut in shortcuts) {
+                val host = try { android.net.Uri.parse(shortcut.url).host } catch (e: Exception) { "" }
+                val fallbackText = if (shortcut.icon.isNotEmpty()) shortcut.icon else if (shortcut.title.isNotEmpty()) shortcut.title.substring(0, 1).uppercase() else "?"
+                
                 shortcutsHtml += """
                     <a href="${shortcut.url}" class="shortcut">
-                        <div class="shortcut-icon">${shortcut.icon}</div>
+                        <div class="shortcut-icon">
+                            <img src="https://www.google.com/s2/favicons?domain=$host&sz=64" style="width: 24px; height: 24px; border-radius: 4px;" onerror="this.outerHTML='${fallbackText}'" />
+                        </div>
                         <span>${shortcut.title}</span>
                     </a>
                 """.trimIndent()
@@ -219,7 +224,7 @@ class MainActivity : AppCompatActivity() {
                 </style>
             </head>
             <body>
-                <img src="${getAppLogoBase64()}" style="width: 120px; height: 120px; margin-bottom: 24px;" alt="SafeBrowser">
+                <img src="${getAppLogoBase64()}" style="width: 120px; height: 120px; margin-bottom: 24px;" alt="Chromia">
                 <div class="search-box">
                     <svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="#9aa0a6"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg>
                     <form action="safebrowser://search" method="GET" style="flex:1; display:flex;">
@@ -911,8 +916,9 @@ class MainActivity : AppCompatActivity() {
         val tab = getActiveTab() ?: return
         val url = tab.url
         if (urlInput.hasFocus()) {
-            if (urlInput.text.toString() != url) {
-                urlInput.setText(url)
+            val editUrl = if (url == "safebrowser://ntp") "" else url
+            if (urlInput.text.toString() != editUrl) {
+                urlInput.setText(editUrl)
             }
         } else {
             if (url.startsWith("http")) {
@@ -927,7 +933,8 @@ class MainActivity : AppCompatActivity() {
                     if (urlInput.text.toString() != url) urlInput.setText(url)
                 }
             } else {
-                if (urlInput.text.toString() != url) urlInput.setText(url)
+                val displayStr = if (url == "safebrowser://ntp") "" else url
+                if (urlInput.text.toString() != displayStr) urlInput.setText(displayStr)
             }
         }
     }
