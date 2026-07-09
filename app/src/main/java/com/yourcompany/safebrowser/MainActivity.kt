@@ -333,7 +333,7 @@ class MainActivity : AppCompatActivity() {
         tabContainer.addView(tabLayout)
         topRow.addView(tabContainer)
 
-        val newTabBtn = createIconButton(android.R.drawable.ic_input_add) { createNewTab("safebrowser://ntp") }
+        val newTabBtn = createIconButton(R.drawable.ic_add) { createNewTab("safebrowser://ntp") }
         topRow.addView(newTabBtn)
 
         toolbar.addView(topRow)
@@ -345,16 +345,16 @@ class MainActivity : AppCompatActivity() {
             layoutTransition = android.animation.LayoutTransition()
         }
 
-        val backBtn = createIconButton(android.R.drawable.ic_media_previous) {
+        val backBtn = createIconButton(R.drawable.ic_back) {
             getActiveWebView()?.goBack()
         }
 
-        val forwardBtn = createIconButton(android.R.drawable.ic_media_next) {
+        val forwardBtn = createIconButton(R.drawable.ic_forward) {
             getActiveWebView()?.goForward()
         }
 
         // Doubles as Stop while a page is loading (issue 6: don't get trapped on a stalled page).
-        refreshBtn = createIconButton(android.R.drawable.ic_popup_sync) {
+        refreshBtn = createIconButton(R.drawable.ic_refresh) {
             if (isLoading) {
                 getActiveWebView()?.stopLoading()
                 setLoadingState(false)
@@ -373,7 +373,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val homeBtn = createIconButton(android.R.drawable.ic_menu_compass) {
+        val homeBtn = createIconButton(R.drawable.ic_home) {
             loadUrlInActiveTab("safebrowser://ntp")
         }
 
@@ -392,13 +392,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         val lockIcon = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_lock_idle_lock)
+            setImageResource(R.drawable.ic_lock)
             setColorFilter(Color.parseColor("#5F6368"))
             layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { setMargins(0, 0, dp(8), 0) }
         }
         addressBar.addView(lockIcon)
 
-        val menuBtn = createIconButton(android.R.drawable.ic_menu_more) { }
+        val menuBtn = createIconButton(R.drawable.ic_menu) { }
         menuBtn.setOnClickListener { showMenu(menuBtn) }
 
         urlInput = EditText(this).apply {
@@ -780,7 +780,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Generic placeholder while the real favicon hasn't arrived yet (or the
                     // site doesn't have one) instead of leaving a blank gap in the tab pill.
-                    setImageResource(android.R.drawable.ic_menu_compass)
+                    setImageResource(R.drawable.ic_home)
                     setColorFilter(Color.parseColor("#9AA0A6"))
                 }
             }
@@ -790,7 +790,7 @@ class MainActivity : AppCompatActivity() {
                 text = if (tab.title.length > 15) tab.title.substring(0, 15) + "..." else tab.title
                 textSize = 13f
                 setTextColor(Color.parseColor("#202124"))
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(0, 0, dp(8), 0)
                 }
             }
@@ -811,6 +811,15 @@ class MainActivity : AppCompatActivity() {
 
             tabLayout.addView(tabView)
         }
+
+        tabLayout.post {
+            val activeIndex = tabs.indexOfFirst { it.id == activeTabId }
+            if (activeIndex != -1 && activeIndex < tabLayout.childCount) {
+                val child = tabLayout.getChildAt(activeIndex)
+                val scrollX = child.left - (tabContainer.width - child.width) / 2
+                tabContainer.smoothScrollTo(scrollX.coerceAtLeast(0), 0)
+            }
+        }
     }
 
     private fun getActiveWebView(): WebView? {
@@ -824,6 +833,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadUrlInActiveTab(input: String) {
         if (input.isBlank()) return
         val url = when {
+            input.startsWith("safebrowser://") -> input
             input.startsWith("http://") || input.startsWith("https://") -> input
             input.contains(".") && !input.contains(" ") -> "https://$input"
             else -> "https://www.google.com/search?q=" + android.net.Uri.encode(input)
@@ -870,7 +880,7 @@ class MainActivity : AppCompatActivity() {
             }
             handler.postDelayed(progressShowRunnable!!, 150)
             
-            refreshBtn.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            refreshBtn.setImageResource(R.drawable.ic_close)
             loadWatchdogRunnable = Runnable {
                 if (isLoading) {
                     getActiveWebView()?.stopLoading()
@@ -893,7 +903,7 @@ class MainActivity : AppCompatActivity() {
                 progressBar.progress = 0
             }.start()
             
-            refreshBtn.setImageResource(android.R.drawable.ic_popup_sync)
+            refreshBtn.setImageResource(R.drawable.ic_refresh)
         }
     }
 
@@ -909,7 +919,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val uri = Uri.parse(url)
                     val host = uri.host ?: ""
-                    val displayUrl = if (uri.scheme == "https") "🔒 $host" else host
+                    val displayUrl = host
                     if (urlInput.text.toString() != displayUrl) {
                         urlInput.setText(displayUrl)
                     }
