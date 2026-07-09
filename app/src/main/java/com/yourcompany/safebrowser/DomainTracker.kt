@@ -128,24 +128,12 @@ class DomainTracker(context: Context) {
     private fun buildJsonPayload(domains: List<String>): String {
         val deviceId = prefs.getString("device_id", "unknown") ?: "unknown"
         val timestamp = System.currentTimeMillis()
-        val sb = StringBuilder()
-        sb.append("{")
-        sb.append("\"device_id\": \"")
-        sb.append(deviceId)
-        sb.append("\",")
-        sb.append("\"timestamp\": ")
-        sb.append(timestamp)
-        sb.append(",")
-        sb.append("\"domains\": [")
-        for (i in domains.indices) {
-            sb.append("\"")
-            sb.append(domains[i])
-            sb.append("\"")
-            if (i < domains.size - 1) sb.append(",")
-        }
-        sb.append("]")
-        sb.append("}")
-        return sb.toString()
+        val payload = mapOf(
+            "device_id" to deviceId,
+            "timestamp" to timestamp,
+            "domains" to domains
+        )
+        return com.google.gson.Gson().toJson(payload)
     }
 
     fun getTrackedCount(): Int = trackedDomains.size

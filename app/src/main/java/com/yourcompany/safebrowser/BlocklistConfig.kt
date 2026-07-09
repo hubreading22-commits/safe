@@ -12,5 +12,7 @@ data class BlocklistConfig(
     @SerializedName("blocked_keywords")
     val blockedKeywords: List<String>? = null,
     @SerializedName("video_blocking")
-    val videoBlocking: Boolean? = true
+    val videoBlocking: Boolean? = true,
+    @SerializedName("audio_blocking")
+    val audioBlocking: Boolean? = false
 )

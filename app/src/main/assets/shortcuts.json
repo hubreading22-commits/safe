@@ -1,0 +1,22 @@
+[
+  {
+    "title": "e-Library",
+    "icon": "📚",
+    "url": "http://192.168.1.200:5000/launcher.html"
+  },
+  {
+    "title": "Gmail",
+    "icon": "🏢",
+    "url": "https://mail.google.com"
+  },
+  {
+    "title": "Gemini",
+    "icon": "🤖",
+    "url": "https://gemini.google.com"
+  },
+  {
+    "title": "Google",
+    "icon": "🔍",
+    "url": "https://www.google.com"
+  }
+]

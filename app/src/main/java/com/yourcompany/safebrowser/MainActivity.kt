@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.Message
 import android.text.InputType
 import android.util.Log
 import android.util.TypedValue
@@ -82,6 +83,7 @@ class MainActivity : AppCompatActivity() {
     private var blockedDomains = mutableListOf<String>()
     private var blockedKeywords = mutableListOf<String>()
     private var videoBlocking = true
+    private var audioBlocking = false
     private val videoExtensions = listOf(".mp4", ".webm", ".m3u8", ".ts", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".3gp")
     private val fallbackBlockedDomains = listOf(
         "youtube.com", "youtu.be", "facebook.com", "fb.com",
@@ -153,29 +155,84 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
     }
 
-    private val ntpHtml = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-                body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; background: #fff; }
-                h1 { color: #202124; font-size: 48px; font-weight: normal; margin-bottom: 24px; }
-                .search-box { display: flex; align-items: center; width: 90%; max-width: 600px; padding: 12px 24px; border-radius: 24px; border: 1px solid #dfe1e5; box-shadow: 0 1px 6px rgba(32,33,36,0.28); }
-                input { flex: 1; border: none; outline: none; font-size: 16px; margin-left: 12px; }
-            </style>
-        </head>
-        <body>
-            <h1>Google</h1>
-            <div class="search-box">
-                <svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="#9aa0a6"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg>
-                <form action="safebrowser://search" method="GET" style="flex:1; display:flex;">
-                    <input type="text" name="q" placeholder="Search the web" autocomplete="off" autofocus>
-                </form>
-            </div>
-        </body>
-        </html>
-    """.trimIndent()
+    data class Shortcut(
+        val title: String,
+        val icon: String,
+        val url: String
+    )
+
+    private var cachedLogoBase64: String? = null
+    private fun getAppLogoBase64(): String {
+        if (cachedLogoBase64 != null) return cachedLogoBase64!!
+        try {
+            val drawable = packageManager.getApplicationIcon(packageName)
+            val bitmap = if (drawable is android.graphics.drawable.BitmapDrawable) {
+                drawable.bitmap
+            } else {
+                val bmp = android.graphics.Bitmap.createBitmap(drawable.intrinsicWidth.coerceAtLeast(1), drawable.intrinsicHeight.coerceAtLeast(1), android.graphics.Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bmp)
+                drawable.setBounds(0, 0, canvas.width, canvas.height)
+                drawable.draw(canvas)
+                bmp
+            }
+            val stream = java.io.ByteArrayOutputStream()
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)
+            cachedLogoBase64 = "data:image/png;base64," + android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+            return cachedLogoBase64!!
+        } catch (e: Exception) {
+            return ""
+        }
+    }
+
+    private fun getNtpHtml(): String {
+        var shortcutsHtml = ""
+        try {
+            val jsonString = assets.open("shortcuts.json").bufferedReader().use { it.readText() }
+            val type = object : com.google.gson.reflect.TypeToken<List<Shortcut>>() {}.type
+            val shortcuts: List<Shortcut> = gson.fromJson(jsonString, type)
+            for (shortcut in shortcuts) {
+                shortcutsHtml += ""${'"'}
+                    <a href="${"$"}{shortcut.url}" class="shortcut">
+                        <div class="shortcut-icon">${"$"}{shortcut.icon}</div>
+                        <span>${"$"}{shortcut.title}</span>
+                    </a>
+                ""${'"'}.trimIndent()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load shortcuts.json", e)
+        }
+
+        return ""${'"'}
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>
+                    body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; background: #fff; }
+                    h1 { color: #202124; font-size: 48px; font-weight: normal; margin-bottom: 24px; }
+                    .search-box { display: flex; align-items: center; width: 90%; max-width: 600px; padding: 12px 24px; border-radius: 24px; border: 1px solid #dfe1e5; box-shadow: 0 1px 6px rgba(32,33,36,0.28); }
+                    input { flex: 1; border: none; outline: none; font-size: 16px; margin-left: 12px; }
+                    .shortcuts { display: flex; gap: 32px; margin-top: 48px; }
+                    .shortcut { display: flex; flex-direction: column; align-items: center; text-decoration: none; color: #3C4043; font-size: 14px; }
+                    .shortcut-icon { width: 48px; height: 48px; border-radius: 50%; background: #F1F3F4; display: flex; align-items: center; justify-content: center; font-size: 24px; margin-bottom: 12px; }
+                    .shortcut:hover .shortcut-icon { background: #E8EAED; }
+                </style>
+            </head>
+            <body>
+                <img src="${"$"}{getAppLogoBase64()}" style="width: 120px; height: 120px; margin-bottom: 24px;" alt="SafeBrowser">
+                <div class="search-box">
+                    <svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="#9aa0a6"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg>
+                    <form action="safebrowser://search" method="GET" style="flex:1; display:flex;">
+                        <input type="text" name="q" placeholder="Search the web" autocomplete="off" autofocus>
+                    </form>
+                </div>
+                <div class="shortcuts">
+                    ${"$"}shortcutsHtml
+                </div>
+            </body>
+            </html>
+        ""${'"'}.trimIndent()
+    }
 
     /** Convert dp to px so touch targets are a consistent physical size on every screen density. */
     private fun dp(value: Int): Int =
@@ -341,6 +398,9 @@ class MainActivity : AppCompatActivity() {
         }
         addressBar.addView(lockIcon)
 
+        val menuBtn = createIconButton(android.R.drawable.ic_menu_more) { }
+        menuBtn.setOnClickListener { showMenu(menuBtn) }
+
         urlInput = EditText(this).apply {
             hint = "Search or type URL"
             setBackgroundColor(Color.TRANSPARENT)
@@ -371,14 +431,7 @@ class MainActivity : AppCompatActivity() {
                 forwardBtn.visibility = visibility
                 refreshBtn.visibility = visibility
                 homeBtn.visibility = visibility
-                // We'll set menuBtn visibility further down because it's defined below... 
-                // wait, since menuBtn is defined after urlInput, we can't reference it here easily in Kotlin
-                // unless we move menuBtn up.
-                // Let's just handle it via the parent view
-                val parentRow = this@apply.parent as? android.view.ViewGroup
-                if (parentRow != null) {
-                    parentRow.getChildAt(parentRow.childCount - 1)?.visibility = visibility
-                }
+                menuBtn.visibility = visibility
 
                 if (hasFocus) {
                     post { selectAll() }
@@ -392,9 +445,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         addressBar.addView(urlInput)
-
-        val menuBtn = createIconButton(android.R.drawable.ic_menu_more) { }
-        menuBtn.setOnClickListener { showMenu(menuBtn) }
 
         addressRow.addView(backBtn)
         addressRow.addView(forwardBtn)
@@ -592,8 +642,8 @@ class MainActivity : AppCompatActivity() {
             // had often already run. addDocumentStartJavaScript runs our script before any
             // page script, on every navigation including iframes, so sites like flyflix can't
             // win the race by starting playback before our blocking code exists.
-            if (videoBlocking && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-                WebViewCompat.addDocumentStartJavaScript(this, getVideoBlockScript(), setOf("*"))
+            if ((videoBlocking || audioBlocking) && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                WebViewCompat.addDocumentStartJavaScript(this, getMediaBlockScript(), setOf("*"))
             }
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -784,7 +834,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadUrlInWebView(webView: WebView, url: String) {
         if (url == "safebrowser://ntp") {
-            webView.loadDataWithBaseURL("safebrowser://ntp", ntpHtml, "text/html", "UTF-8", null)
+            webView.loadDataWithBaseURL("safebrowser://ntp", getNtpHtml(), "text/html", "UTF-8", null)
             urlInput.setText("")
             return
         }
@@ -928,16 +978,19 @@ class MainActivity : AppCompatActivity() {
         val cachedDomains = blocklistPrefs.getStringSet("cached_domains", null)
         val cachedKeywords = blocklistPrefs.getStringSet("cached_keywords", null)
         val cachedVideo = blocklistPrefs.getBoolean("cached_video_blocking", true)
+        val cachedAudio = blocklistPrefs.getBoolean("cached_audio_blocking", false)
         blockedDomains = if (cachedDomains != null) cachedDomains.toMutableList() else fallbackBlockedDomains.toMutableList()
         blockedKeywords = if (cachedKeywords != null) cachedKeywords.toMutableList() else mutableListOf()
         videoBlocking = cachedVideo
+        audioBlocking = cachedAudio
     }
 
-    private fun saveBlocklist(domains: List<String>, keywords: List<String>, video: Boolean) {
+    private fun saveBlocklist(domains: List<String>, keywords: List<String>, video: Boolean, audio: Boolean) {
         blocklistPrefs.edit()
             .putStringSet("cached_domains", domains.toSet())
             .putStringSet("cached_keywords", keywords.toSet())
             .putBoolean("cached_video_blocking", video)
+            .putBoolean("cached_audio_blocking", audio)
             .apply()
     }
 
@@ -970,15 +1023,18 @@ class MainActivity : AppCompatActivity() {
             val domains = (config.blockedDomains ?: emptyList()).toMutableList()
             val keywords = (config.blockedKeywords ?: emptyList()).toMutableList()
             val video = config.videoBlocking ?: true
+            val audio = config.audioBlocking ?: false
             if (domains.isNotEmpty() || keywords.isNotEmpty()) {
                 handler.post {
                     if (domains.isNotEmpty()) blockedDomains = domains
                     if (keywords.isNotEmpty()) blockedKeywords = keywords
                     videoBlocking = video
+                    audioBlocking = audio
                     saveBlocklist(
                         if (domains.isNotEmpty()) domains else blockedDomains,
                         if (keywords.isNotEmpty()) keywords else blockedKeywords,
-                        video
+                        video,
+                        audio
                     )
                     Toast.makeText(
                         this,
@@ -1026,89 +1082,117 @@ class MainActivity : AppCompatActivity() {
         return "<html><head><title>Access Blocked</title><style>body{font-family:Arial,sans-serif;text-align:center;padding-top:100px;background:#f5f5f5;}.block-icon{font-size:80px;color:#d32f2f;}h1{color:#d32f2f;}p{color:#666;font-size:18px;}.back-link{display:inline-block;margin-top:30px;padding:12px 24px;background:#1976d2;color:white;text-decoration:none;border-radius:4px;}</style></head><body><div class=\"block-icon\">&#128683;</div><h1>Access Blocked</h1><p>This website or content has been blocked by your administrator.</p><a href=\"https://www.google.com\" class=\"back-link\">Go back to Google</a></body></html>"
     }
 
-    private fun getVideoBlockScript(): String {
-        if (!videoBlocking) return ""
+    private fun getMediaBlockScript(): String {
+        if (!videoBlocking && !audioBlocking) return ""
         return """
             (function() {
+                var blockVideo = ${"$"}{if (videoBlocking) "true" else "false"};
+                var blockAudio = ${"$"}{if (audioBlocking) "true" else "false"};
                 function neuter(el) {
                     try { if (el.pause) el.pause(); } catch(e) {}
                     try { el.src = ""; el.removeAttribute("src"); if (el.load) el.load(); } catch(e) {}
                     try { el.remove(); } catch(e) {}
                 }
 
-                // Block playback at the prototype level: works no matter how the player got
-                // built (innerHTML, Shadow DOM, custom player libs), not just elements we
-                // happen to spot via MutationObserver after the fact.
                 try {
                     var origPlay = HTMLMediaElement.prototype.play;
                     HTMLMediaElement.prototype.play = function() {
-                        neuter(this);
-                        return Promise.reject(new DOMException("Video blocked", "NotAllowedError"));
+                        var isVideo = this instanceof HTMLVideoElement;
+                        var isAudio = this instanceof HTMLAudioElement;
+                        if ((isVideo && blockVideo) || (isAudio && blockAudio)) {
+                            neuter(this);
+                            return Promise.reject(new DOMException("Media blocked", "NotAllowedError"));
+                        }
+                        return origPlay.apply(this, arguments);
                     };
                 } catch(e) {}
 
-                // Block src / srcObject assignment so a neutered element can't be re-armed.
                 try {
                     var srcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src");
                     if (srcDesc && srcDesc.configurable) {
+                        var origSet = srcDesc.set;
                         Object.defineProperty(HTMLMediaElement.prototype, "src", {
                             get: function() { return ""; },
-                            set: function(v) {},
-                            configurable: true
-                        });
-                    }
-                } catch(e) {}
-                try {
-                    var srcObjDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject");
-                    if (srcObjDesc && srcObjDesc.configurable) {
-                        Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
-                            get: function() { return null; },
-                            set: function(v) {},
+                            set: function(v) {
+                                var isVideo = this instanceof HTMLVideoElement;
+                                var isAudio = this instanceof HTMLAudioElement;
+                                if ((isVideo && blockVideo) || (isAudio && blockAudio)) return;
+                                if (origSet) origSet.call(this, v);
+                            },
                             configurable: true
                         });
                     }
                 } catch(e) {}
 
-                // Intercept element creation so video/audio elements are dead on arrival,
-                // before any page script gets a working reference to one.
+                try {
+                    var srcObjDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject");
+                    if (srcObjDesc && srcObjDesc.configurable) {
+                        var origObjSet = srcObjDesc.set;
+                        Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+                            get: function() { return null; },
+                            set: function(v) {
+                                var isVideo = this instanceof HTMLVideoElement;
+                                var isAudio = this instanceof HTMLAudioElement;
+                                if ((isVideo && blockVideo) || (isAudio && blockAudio)) return;
+                                if (origObjSet) origObjSet.call(this, v);
+                            },
+                            configurable: true
+                        });
+                    }
+                } catch(e) {}
+
                 try {
                     var origCreateElement = document.createElement.bind(document);
                     document.createElement = function(tagName) {
                         var el = origCreateElement(tagName);
-                        if (typeof tagName === "string" && /^(video|audio)$/i.test(tagName)) {
-                            neuter(el);
+                        if (typeof tagName === "string") {
+                            if ((tagName.toLowerCase() === "video" && blockVideo) || (tagName.toLowerCase() === "audio" && blockAudio)) {
+                                neuter(el);
+                            }
                         }
                         return el;
                     };
                 } catch(e) {}
+                
+                if (blockAudio) {
+                    try {
+                        window.AudioContext = function() { throw new Error("Audio blocked"); };
+                        window.webkitAudioContext = function() { throw new Error("Audio blocked"); };
+                    } catch(e) {}
+                }
 
                 var blockedIframeHosts = ["youtube", "youtu.be", "vimeo", "dailymotion", "twitch", "tiktok", "netflix", "primevideo", "disney", "hulu"];
-                function killVideos() {
-                    document.querySelectorAll("video, audio").forEach(neuter);
-                    document.querySelectorAll("iframe").forEach(function(f) {
-                        var src = (f.src || "").toLowerCase();
-                        if (blockedIframeHosts.some(function(h) { return src.includes(h); })) {
-                            f.src = "about:blank"; f.remove();
-                        }
-                    });
+                function killMedia() {
+                    if (blockVideo) document.querySelectorAll("video").forEach(neuter);
+                    if (blockAudio) document.querySelectorAll("audio").forEach(neuter);
+                    if (blockVideo) {
+                        document.querySelectorAll("iframe").forEach(function(f) {
+                            var src = (f.src || "").toLowerCase();
+                            if (blockedIframeHosts.some(function(h) { return src.includes(h); })) {
+                                f.src = "about:blank"; f.remove();
+                            }
+                        });
+                    }
                 }
 
                 function startObserving() {
-                    if (document.body) killVideos();
-                    var observer = new MutationObserver(function() { killVideos(); });
+                    if (document.body) killMedia();
+                    var observer = new MutationObserver(function() { killMedia(); });
                     observer.observe(document.documentElement, { childList: true, subtree: true });
                 }
                 if (document.documentElement) startObserving();
                 else document.addEventListener("DOMContentLoaded", startObserving);
 
-                // Network-level block on direct media file / streaming-manifest requests.
-                var blockedExt = [".mp4", ".webm", ".m3u8", ".ts", ".mkv", ".mov", ".flv", ".wmv", ".3gp"];
+                var blockedExt = [];
+                if (blockVideo) blockedExt = blockedExt.concat([".mp4", ".webm", ".m3u8", ".ts", ".mkv", ".mov", ".flv", ".wmv", ".3gp"]);
+                if (blockAudio) blockedExt = blockedExt.concat([".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]);
+                
                 try {
                     var origFetch = window.fetch;
                     window.fetch = function(url, options) {
                         var s = (url || "").toString().toLowerCase();
                         if (blockedExt.some(function(p) { return s.includes(p); })) {
-                            return Promise.reject(new Error("Video blocked"));
+                            return Promise.reject(new Error("Media blocked"));
                         }
                         return origFetch.apply(this, arguments);
                     };
@@ -1197,9 +1281,9 @@ class MainActivity : AppCompatActivity() {
             view?.title?.let { title -> tab.title = title }
             updateTabUI()
             if (tab.id == activeTabId) setLoadingState(false)
-            if (videoBlocking && url != null && url != lastVideoScriptInjectedForUrl) {
+            if ((videoBlocking || audioBlocking) && url != null && url != lastVideoScriptInjectedForUrl) {
                 lastVideoScriptInjectedForUrl = url
-                view?.evaluateJavascript(getVideoBlockScript(), null)
+                view?.evaluateJavascript(getMediaBlockScript(), null)
             }
             url?.let { domainTracker.trackDomain(it) }
         }
@@ -1265,7 +1349,30 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-            Toast.makeText(this@MainActivity, "Fullscreen video is blocked", Toast.LENGTH_SHORT).show()
+            if (videoBlocking) {
+                Toast.makeText(this@MainActivity, "Fullscreen video is blocked", Toast.LENGTH_SHORT).show()
+                callback?.onCustomViewHidden()
+            } else {
+                // If video blocking is off, gracefully decline to handle custom view, 
+                // so the WebView falls back to inline play or handles it itself.
+                callback?.onCustomViewHidden()
+            }
+        }
+
+        override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
+            val newWebView = createWebView()
+            val transport = resultMsg?.obj as? WebView.WebViewTransport
+            if (transport != null) {
+                transport.webView = newWebView
+                resultMsg.sendToTarget()
+                val newTabId = tabCounter.incrementAndGet()
+                val newTab = TabData(id = newTabId, url = "about:blank", title = "New Tab", webView = newWebView)
+                tabs.add(newTab)
+                webViewContainer.addView(newWebView)
+                switchToTab(newTabId)
+                return true
+            }
+            return false
         }
 
         override fun onHideCustomView() {}
@@ -1308,5 +1415,9 @@ class MainActivity : AppCompatActivity() {
         refreshRunnable?.let { handler.removeCallbacks(it) }
         loadWatchdogRunnable?.let { handler.removeCallbacks(it) }
         executor.shutdown()
+        for (tab in tabs) {
+            tab.webView?.destroy()
+        }
+        tabs.clear()
     }
 }
