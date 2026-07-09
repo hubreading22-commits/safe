@@ -14,5 +14,13 @@ data class BlocklistConfig(
     @SerializedName("video_blocking")
     val videoBlocking: Boolean? = true,
     @SerializedName("audio_blocking")
-    val audioBlocking: Boolean? = false
+    val audioBlocking: Boolean? = false,
+    @SerializedName("shortcuts")
+    val shortcuts: List<Shortcut>? = null
+)
+
+data class Shortcut(
+    @SerializedName("title") val title: String,
+    @SerializedName("icon") val icon: String,
+    @SerializedName("url") val url: String
 )

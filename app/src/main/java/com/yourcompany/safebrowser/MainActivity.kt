@@ -112,6 +112,32 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        @android.webkit.JavascriptInterface
+        fun requestUnblock(domain: String) {
+            executor.execute {
+                try {
+                    val url = java.net.URL(REMOTE_CONFIG_URL.replace("/api/config", "/api/unblock"))
+                    val connection = url.openConnection() as java.net.HttpURLConnection
+                    connection.requestMethod = "POST"
+                    connection.setRequestProperty("Content-Type", "application/json")
+                    connection.doOutput = true
+                    val json = "{\"domain\":\"$domain\"}"
+                    connection.outputStream.use { it.write(json.toByteArray()) }
+                    
+                    val responseCode = connection.responseCode
+                    if (responseCode == 200) {
+                        handler.post {
+                            android.widget.Toast.makeText(this@MainActivity, "Unblock request sent for $domain", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    handler.post {
+                        android.widget.Toast.makeText(this@MainActivity, "Failed to send request", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
     }
 
     private fun applyThemeColor(targetColor: Int) {
@@ -155,11 +181,7 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
     }
 
-    data class Shortcut(
-        val title: String,
-        val icon: String,
-        val url: String
-    )
+
 
     private var cachedLogoBase64: String? = null
     private fun getAppLogoBase64(): String {
@@ -187,9 +209,15 @@ class MainActivity : AppCompatActivity() {
     private fun getNtpHtml(): String {
         var shortcutsHtml = ""
         try {
-            val jsonString = assets.open("shortcuts.json").bufferedReader().use { it.readText() }
-            val type = object : com.google.gson.reflect.TypeToken<List<Shortcut>>() {}.type
-            val shortcuts: List<Shortcut> = gson.fromJson(jsonString, type)
+            val cachedShortcutsJson = blocklistPrefs.getString("cached_shortcuts", null)
+            val shortcuts: List<Shortcut> = if (cachedShortcutsJson != null) {
+                val type = object : com.google.gson.reflect.TypeToken<List<Shortcut>>() {}.type
+                gson.fromJson(cachedShortcutsJson, type)
+            } else {
+                val jsonString = assets.open("shortcuts.json").bufferedReader().use { it.readText() }
+                val type = object : com.google.gson.reflect.TypeToken<List<Shortcut>>() {}.type
+                gson.fromJson(jsonString, type)
+            }
             for (shortcut in shortcuts) {
                 val host = try { android.net.Uri.parse(shortcut.url).host } catch (e: Exception) { "" }
                 val fallbackText = if (shortcut.icon.isNotEmpty()) shortcut.icon else if (shortcut.title.isNotEmpty()) shortcut.title.substring(0, 1).uppercase() else "?"
@@ -211,6 +239,7 @@ class MainActivity : AppCompatActivity() {
             <!DOCTYPE html>
             <html>
             <head>
+                <title>New Tab</title>
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <style>
                     body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; background: #fff; }
@@ -379,7 +408,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val homeBtn = createIconButton(R.drawable.ic_home) {
-            loadUrlInActiveTab("safebrowser://ntp")
+            createNewTab("safebrowser://ntp")
         }
 
         val addressBar = LinearLayout(this).apply {
@@ -854,7 +883,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (isBlocked(url)) {
-            webView.loadDataWithBaseURL(url, getBlockedHtml(), "text/html", "UTF-8", null)
+            webView.loadDataWithBaseURL(url, getBlockedHtml(url), "text/html", "UTF-8", null)
             urlInput.setText(url)
             return
         }
@@ -1000,15 +1029,21 @@ class MainActivity : AppCompatActivity() {
         blockedKeywords = if (cachedKeywords != null) cachedKeywords.toMutableList() else mutableListOf()
         videoBlocking = cachedVideo
         audioBlocking = cachedAudio
+        // Shortcuts are read directly in getNtpHtml from blocklistPrefs
     }
 
-    private fun saveBlocklist(domains: List<String>, keywords: List<String>, video: Boolean, audio: Boolean) {
-        blocklistPrefs.edit()
+    private fun saveBlocklist(domains: List<String>, keywords: List<String>, video: Boolean, audio: Boolean, shortcuts: List<Shortcut>?) {
+        val editor = blocklistPrefs.edit()
             .putStringSet("cached_domains", domains.toSet())
             .putStringSet("cached_keywords", keywords.toSet())
             .putBoolean("cached_video_blocking", video)
             .putBoolean("cached_audio_blocking", audio)
-            .apply()
+            
+        if (shortcuts != null) {
+            editor.putString("cached_shortcuts", gson.toJson(shortcuts))
+        }
+        
+        editor.apply()
     }
 
     private fun fetchBlocklist() {
@@ -1041,24 +1076,23 @@ class MainActivity : AppCompatActivity() {
             val keywords = (config.blockedKeywords ?: emptyList()).toMutableList()
             val video = config.videoBlocking ?: true
             val audio = config.audioBlocking ?: false
-            if (domains.isNotEmpty() || keywords.isNotEmpty()) {
-                handler.post {
-                    if (domains.isNotEmpty()) blockedDomains = domains
-                    if (keywords.isNotEmpty()) blockedKeywords = keywords
-                    videoBlocking = video
-                    audioBlocking = audio
-                    saveBlocklist(
-                        if (domains.isNotEmpty()) domains else blockedDomains,
-                        if (keywords.isNotEmpty()) keywords else blockedKeywords,
-                        video,
-                        audio
-                    )
-                    Toast.makeText(
-                        this,
-                        "Blocklist updated: ${blockedDomains.size} domains, ${blockedKeywords.size} keywords",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
+            handler.post {
+                if (domains.isNotEmpty()) blockedDomains = domains
+                if (keywords.isNotEmpty()) blockedKeywords = keywords
+                videoBlocking = video
+                audioBlocking = audio
+                saveBlocklist(
+                    if (domains.isNotEmpty()) domains else blockedDomains,
+                    if (keywords.isNotEmpty()) keywords else blockedKeywords,
+                    video,
+                    audio,
+                    config.shortcuts
+                )
+                Toast.makeText(
+                    this,
+                    "Blocklist updated: ${blockedDomains.size} domains, ${blockedKeywords.size} keywords",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse blocklist", e)
@@ -1095,8 +1129,9 @@ class MainActivity : AppCompatActivity() {
         return false
     }
 
-    private fun getBlockedHtml(): String {
-        return "<html><head><title>Access Blocked</title><style>body{font-family:Arial,sans-serif;text-align:center;padding-top:100px;background:#f5f5f5;}.block-icon{font-size:80px;color:#d32f2f;}h1{color:#d32f2f;}p{color:#666;font-size:18px;}.back-link{display:inline-block;margin-top:30px;padding:12px 24px;background:#1976d2;color:white;text-decoration:none;border-radius:4px;}</style></head><body><div class=\"block-icon\">&#128683;</div><h1>Access Blocked</h1><p>This website or content has been blocked by your administrator.</p><a href=\"https://www.google.com\" class=\"back-link\">Go back to Google</a></body></html>"
+    private fun getBlockedHtml(url: String): String {
+        val domain = try { android.net.Uri.parse(url).host ?: url } catch (e: Exception) { url }
+        return "<html><head><title>Access Blocked</title><style>body{font-family:Arial,sans-serif;text-align:center;padding-top:100px;background:#f5f5f5;}.block-icon{font-size:80px;color:#d32f2f;}h1{color:#d32f2f;}p{color:#666;font-size:18px;}.back-link, .unblock-btn{display:inline-block;margin:10px;padding:12px 24px;background:#1976d2;color:white;text-decoration:none;border-radius:4px;border:none;font-size:16px;cursor:pointer;}.unblock-btn{background:#f57c00;}</style></head><body><div class=\"block-icon\">&#128683;</div><h1>Access Blocked</h1><p>This website or content has been blocked by your administrator.</p><br><a href=\"https://www.google.com\" class=\"back-link\">Go back to Google</a><button class=\"unblock-btn\" onclick=\"AndroidTheme.requestUnblock('${domain.replace("'", "\\'")}'); this.disabled=true; this.innerText='Request Sent';\">Request Unblock</button></body></html>"
     }
 
     private fun getMediaBlockScript(): String {
@@ -1252,7 +1287,7 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
             if (isBlocked(url)) {
-                view?.loadDataWithBaseURL(url, getBlockedHtml(), "text/html", "UTF-8", null)
+                view?.loadDataWithBaseURL(url, getBlockedHtml(url), "text/html", "UTF-8", null)
                 return true
             }
             // issue 4: tapping a link inside a page doesn't go through loadUrlInWebView(),
