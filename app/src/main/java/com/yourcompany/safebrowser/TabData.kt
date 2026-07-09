@@ -8,5 +8,6 @@ data class TabData(
     var title: String = "New Tab",
     var favicon: android.graphics.Bitmap? = null,
     var webView: WebView? = null,
-    var isLoading: Boolean = false
+    var isLoading: Boolean = false,
+    var themeColor: Int = android.graphics.Color.parseColor("#FFFFFF")
 )
