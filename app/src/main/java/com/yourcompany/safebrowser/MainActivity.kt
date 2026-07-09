@@ -251,22 +251,22 @@ class MainActivity : AppCompatActivity() {
                 <style>
                     body { 
                         display: flex; flex-direction: column; align-items: center; 
-                        min-height: 100vh; margin: 0; padding-top: 64px;
+                        min-height: 100vh; margin: 0; padding-top: 48px;
                         font-family: 'Google Sans', Roboto, Arial, sans-serif; 
-                        background: #F0F4F9; /* Material 3 Cool Background */
+                        background: #E8E7EF;
                     }
-                    .logo-container { margin-bottom: 32px; }
+                    .logo-container { margin-bottom: 24px; }
                     .search-box { 
                         display: flex; align-items: center; width: 85%; max-width: 600px; 
                         padding: 14px 24px; border-radius: 30px; 
-                        background: #FFFFFF; border: none;
-                        box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+                        background: #E8E7EF; border: none;
+                        box-shadow: none;
                     }
                     input { 
                         flex: 1; border: none; outline: none; font-size: 16px; 
-                        margin-left: 12px; color: #1F1F1F; background: transparent;
+                        margin-left: 12px; color: #202124; background: transparent;
                     }
-                    input::placeholder { color: #444746; }
+                    input::placeholder { color: #5F6368; }
                     .shortcuts-card {
                         display: flex; gap: 24px; padding: 24px 32px; margin-top: 32px;
                         background: #FFFFFF; border-radius: 24px;
@@ -275,15 +275,15 @@ class MainActivity : AppCompatActivity() {
                     }
                     .shortcut { 
                         display: flex; flex-direction: column; align-items: center; 
-                        text-decoration: none; color: #444746; font-size: 12px; font-weight: 500;
+                        text-decoration: none; color: #5F6368; font-size: 12px; font-weight: 500;
                         min-width: 64px;
                     }
                     .shortcut-icon { 
-                        width: 48px; height: 48px; border-radius: 50%; 
-                        background: #F0F4F9; display: flex; align-items: center; justify-content: center; 
-                        font-size: 20px; margin-bottom: 8px; color: #1F1F1F;
+                        width: 48px; height: 48px; border-radius: 16px; 
+                        background: #E8E7EF; display: flex; align-items: center; justify-content: center; 
+                        font-size: 20px; margin-bottom: 8px; color: #202124;
                     }
-                    .shortcut:hover .shortcut-icon { background: #E3E8EF; }
+                    .shortcut:hover .shortcut-icon { background: #E3E2E9; }
 
                     /* Discover Feed Styles */
                     .discover-container {
@@ -326,13 +326,21 @@ class MainActivity : AppCompatActivity() {
             </head>
             <body>
                 <div class="logo-container">
-                    <img src="${getAppLogoBase64()}" style="width: 100px; height: 100px; border-radius: 20px;" alt="Chromia">
+                    <img src="${getAppLogoBase64()}" style="width: 150px; height: 150px; border-radius: 24px;" alt="Chromia">
                 </div>
                 <div class="search-box">
                     <svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="#5F6368"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg>
                     <form action="https://www.google.com/search" method="GET" style="flex:1; display:flex;">
                         <input type="text" name="q" placeholder="Search the web" autocomplete="off" autofocus>
                     </form>
+                </div>
+                <div style="display: flex; gap: 16px; margin-top: 16px; width: 85%; max-width: 600px;">
+                    <button style="flex: 1; padding: 12px; border-radius: 20px; border: none; background: #E8E7EF; color: #202124; font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+                        <span style="margin-right: 8px; font-size: 16px;">✨</span> AI Mode
+                    </button>
+                    <button style="flex: 1; padding: 12px; border-radius: 20px; border: none; background: #E8E7EF; color: #202124; font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer;">
+                        <span style="margin-right: 8px; font-size: 16px;">🕵️</span> Incognito
+                    </button>
                 </div>
                 ${if (shortcutsHtml.isNotBlank()) "<div class=\"shortcuts-card\">\n$shortcutsHtml\n</div>" else ""}
                 
@@ -461,14 +469,14 @@ class MainActivity : AppCompatActivity() {
 
         toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#FFFFFF"))
+            setBackgroundColor(Color.parseColor("#E3E2E9"))
             elevation = dp(4).toFloat()
         }
 
         val topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#E3E8EF")) // Material 3 Cool Tab Strip
+            setBackgroundColor(Color.parseColor("#E3E2E9"))
             setPadding(dp(8), dp(8), dp(8), 0)
         }
 
@@ -532,7 +540,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(2), dp(12), dp(2))
             val shape = GradientDrawable().apply {
                 cornerRadius = dp(24).toFloat()
-                setColor(Color.parseColor("#F0F4F9"))
+                setColor(Color.parseColor("#E8E7EF"))
             }
             background = shape
             layoutParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply {
@@ -542,7 +550,7 @@ class MainActivity : AppCompatActivity() {
 
         val lockIcon = ImageView(this).apply {
             setImageResource(R.drawable.ic_lock)
-            setColorFilter(Color.parseColor("#444746"))
+            setColorFilter(Color.parseColor("#5F6368"))
             layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { setMargins(0, 0, dp(8), 0) }
         }
         addressBar.addView(lockIcon)
@@ -553,8 +561,8 @@ class MainActivity : AppCompatActivity() {
         urlInput = EditText(this).apply {
             hint = "Search or type URL"
             setBackgroundColor(Color.TRANSPARENT)
-            setTextColor(Color.parseColor("#1F1F1F"))
-            setHintTextColor(Color.parseColor("#444746"))
+            setTextColor(Color.parseColor("#202124"))
+            setHintTextColor(Color.parseColor("#5F6368"))
             textSize = 16f
             maxLines = 1
             isSingleLine = true
@@ -727,7 +735,7 @@ class MainActivity : AppCompatActivity() {
         theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true)
         return ImageView(this).apply {
             setImageResource(iconRes)
-            setColorFilter(Color.parseColor("#444746")) // Material 3 dark gray icons
+            setColorFilter(Color.parseColor("#5F6368"))
             layoutParams = LinearLayout.LayoutParams(touchSize, touchSize).apply { setMargins(dp(2), 0, dp(2), 0) }
             setPadding(iconInset, iconInset, iconInset, iconInset)
             isClickable = true
@@ -903,7 +911,7 @@ class MainActivity : AppCompatActivity() {
                 val shape = GradientDrawable().apply {
                     val radius = dp(12).toFloat()
                     cornerRadii = floatArrayOf(radius, radius, radius, radius, 0f, 0f, 0f, 0f)
-                    setColor(if (isActive) Color.parseColor("#FFFFFF") else Color.TRANSPARENT)
+                    setColor(if (isActive) Color.parseColor("#E3E2E9") else Color.TRANSPARENT)
                 }
                 background = shape
                 layoutParams = LinearLayout.LayoutParams(
@@ -942,7 +950,7 @@ class MainActivity : AppCompatActivity() {
             val titleView = TextView(this).apply {
                 text = if (tab.title.length > 15) tab.title.substring(0, 15) + "..." else tab.title
                 textSize = 13f
-                setTextColor(Color.parseColor(if (isActive) "#1F1F1F" else "#444746"))
+                setTextColor(Color.parseColor(if (isActive) "#202124" else "#5F6368"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     setMargins(0, 0, dp(8), 0)
                 }
@@ -952,7 +960,7 @@ class MainActivity : AppCompatActivity() {
             val closeBtn = TextView(this).apply {
                 text = "\u2715"
                 textSize = 14f
-                setTextColor(Color.parseColor(if (isActive) "#444746" else "#74777F"))
+                setTextColor(Color.parseColor(if (isActive) "#5F6368" else "#9AA0A6"))
                 // A real touch target rather than relying on the text glyph's tiny hitbox.
                 minWidth = dp(32)
                 minHeight = dp(32)
