@@ -191,18 +191,18 @@ class MainActivity : AppCompatActivity() {
             val type = object : com.google.gson.reflect.TypeToken<List<Shortcut>>() {}.type
             val shortcuts: List<Shortcut> = gson.fromJson(jsonString, type)
             for (shortcut in shortcuts) {
-                shortcutsHtml += ""${'"'}
-                    <a href="${"$"}{shortcut.url}" class="shortcut">
-                        <div class="shortcut-icon">${"$"}{shortcut.icon}</div>
-                        <span>${"$"}{shortcut.title}</span>
+                shortcutsHtml += """
+                    <a href="${shortcut.url}" class="shortcut">
+                        <div class="shortcut-icon">${shortcut.icon}</div>
+                        <span>${shortcut.title}</span>
                     </a>
-                ""${'"'}.trimIndent()
+                """.trimIndent()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load shortcuts.json", e)
         }
 
-        return ""${'"'}
+        return """
             <!DOCTYPE html>
             <html>
             <head>
@@ -219,7 +219,7 @@ class MainActivity : AppCompatActivity() {
                 </style>
             </head>
             <body>
-                <img src="${"$"}{getAppLogoBase64()}" style="width: 120px; height: 120px; margin-bottom: 24px;" alt="SafeBrowser">
+                <img src="${getAppLogoBase64()}" style="width: 120px; height: 120px; margin-bottom: 24px;" alt="SafeBrowser">
                 <div class="search-box">
                     <svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20" fill="#9aa0a6"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"></path></svg>
                     <form action="safebrowser://search" method="GET" style="flex:1; display:flex;">
@@ -227,11 +227,11 @@ class MainActivity : AppCompatActivity() {
                     </form>
                 </div>
                 <div class="shortcuts">
-                    ${"$"}shortcutsHtml
+                    $shortcutsHtml
                 </div>
             </body>
             </html>
-        ""${'"'}.trimIndent()
+        """.trimIndent()
     }
 
     /** Convert dp to px so touch targets are a consistent physical size on every screen density. */
@@ -1086,8 +1086,8 @@ class MainActivity : AppCompatActivity() {
         if (!videoBlocking && !audioBlocking) return ""
         return """
             (function() {
-                var blockVideo = ${"$"}{if (videoBlocking) "true" else "false"};
-                var blockAudio = ${"$"}{if (audioBlocking) "true" else "false"};
+                var blockVideo = ${if (videoBlocking) "true" else "false"};
+                var blockAudio = ${if (audioBlocking) "true" else "false"};
                 function neuter(el) {
                     try { if (el.pause) el.pause(); } catch(e) {}
                     try { el.src = ""; el.removeAttribute("src"); if (el.load) el.load(); } catch(e) {}
@@ -1340,10 +1340,10 @@ class MainActivity : AppCompatActivity() {
             // the halfway point to catch sites that play media before finishing load) instead of
             // on every single progress tick, which was spamming evaluateJavascript and causing
             // jank on slow connections (part of issue 6).
-            if (newProgress in 50..55 && videoBlocking) {
+            if (newProgress in 50..55 && (videoBlocking || audioBlocking)) {
                 val currentUrl = view?.url
                 if (currentUrl != null && currentUrl != lastVideoScriptInjectedForUrl) {
-                    view?.evaluateJavascript(getVideoBlockScript(), null)
+                    view?.evaluateJavascript(getMediaBlockScript(), null)
                 }
             }
         }
