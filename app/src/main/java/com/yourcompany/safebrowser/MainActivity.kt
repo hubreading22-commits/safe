@@ -375,8 +375,10 @@ class MainActivity : AppCompatActivity() {
                 // wait, since menuBtn is defined after urlInput, we can't reference it here easily in Kotlin
                 // unless we move menuBtn up.
                 // Let's just handle it via the parent view
-                val parentRow = this@apply.parent as? ViewGroup
-                parentRow?.getChildAt(parentRow.childCount - 1)?.visibility = visibility
+                val parentRow = this@apply.parent as? android.view.ViewGroup
+                if (parentRow != null) {
+                    parentRow.getChildAt(parentRow.childCount - 1)?.visibility = visibility
+                }
 
                 if (hasFocus) {
                     post { selectAll() }
@@ -424,9 +426,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         webViewContainer = FrameLayout(this).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
+            layoutParams = android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
         swipeRefreshLayout.addView(webViewContainer)
