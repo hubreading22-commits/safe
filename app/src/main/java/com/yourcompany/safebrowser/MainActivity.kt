@@ -84,7 +84,8 @@ class MainActivity : AppCompatActivity() {
     private var blockedKeywords = mutableListOf<String>()
     private var videoBlocking = true
     private var audioBlocking = false
-    private val videoExtensions = listOf(".mp4", ".webm", ".m3u8", ".ts", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".3gp")
+    private val videoExtensions = listOf(".mp4", ".webm", ".m3u8", ".ts", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".3gp", ".mpd", ".m4v", ".f4v")
+    private val audioExtensions = listOf(".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".mka", ".opus")
     private val fallbackBlockedDomains = listOf(
         "youtube.com", "youtu.be", "facebook.com", "fb.com",
         "tiktok.com", "netflix.com", "primevideo.com", "disneyplus.com",
@@ -138,6 +139,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        @android.webkit.JavascriptInterface
+        fun isVideoBlocked(): Boolean = videoBlocking
+
+        @android.webkit.JavascriptInterface
+        fun isAudioBlocked(): Boolean = audioBlocking
     }
 
     private fun applyThemeColor(targetColor: Int) {
@@ -676,7 +683,7 @@ class MainActivity : AppCompatActivity() {
             // had often already run. addDocumentStartJavaScript runs our script before any
             // page script, on every navigation including iframes, so sites like flyflix can't
             // win the race by starting playback before our blocking code exists.
-            if ((videoBlocking || audioBlocking) && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 WebViewCompat.addDocumentStartJavaScript(this, getMediaBlockScript(), setOf("*"))
             }
             layoutParams = FrameLayout.LayoutParams(
@@ -1125,7 +1132,8 @@ class MainActivity : AppCompatActivity() {
         // freevpnapp.com), but that means very short keywords (1-2 chars) can overblock
         // unrelated sites. Keep an eye on what gets pushed as a keyword from the dashboard.
         if (blockedKeywords.any { lowerUrl.contains(it.lowercase()) }) return true
-        if (videoExtensions.any { lowerUrl.endsWith(it, ignoreCase = true) }) return true
+        if (videoBlocking && videoExtensions.any { lowerUrl.endsWith(it, ignoreCase = true) }) return true
+        if (audioBlocking && audioExtensions.any { lowerUrl.endsWith(it, ignoreCase = true) }) return true
         return false
     }
 
@@ -1135,11 +1143,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun getMediaBlockScript(): String {
-        if (!videoBlocking && !audioBlocking) return ""
         return """
             (function() {
-                var blockVideo = ${if (videoBlocking) "true" else "false"};
-                var blockAudio = ${if (audioBlocking) "true" else "false"};
+                function isVideoBlocked() { return window.AndroidTheme ? window.AndroidTheme.isVideoBlocked() : false; }
+                function isAudioBlocked() { return window.AndroidTheme ? window.AndroidTheme.isAudioBlocked() : false; }
+                
                 function neuter(el) {
                     try { if (el.pause) el.pause(); } catch(e) {}
                     try { el.src = ""; el.removeAttribute("src"); if (el.load) el.load(); } catch(e) {}
@@ -1149,9 +1157,9 @@ class MainActivity : AppCompatActivity() {
                 try {
                     var origPlay = HTMLMediaElement.prototype.play;
                     HTMLMediaElement.prototype.play = function() {
-                        var isVideo = this instanceof HTMLVideoElement;
-                        var isAudio = this instanceof HTMLAudioElement;
-                        if ((isVideo && blockVideo) || (isAudio && blockAudio)) {
+                        var isVid = this instanceof HTMLVideoElement;
+                        var isAud = this instanceof HTMLAudioElement;
+                        if ((isVid && isVideoBlocked()) || (isAud && isAudioBlocked())) {
                             neuter(this);
                             return Promise.reject(new DOMException("Media blocked", "NotAllowedError"));
                         }
@@ -1166,9 +1174,9 @@ class MainActivity : AppCompatActivity() {
                         Object.defineProperty(HTMLMediaElement.prototype, "src", {
                             get: function() { return ""; },
                             set: function(v) {
-                                var isVideo = this instanceof HTMLVideoElement;
-                                var isAudio = this instanceof HTMLAudioElement;
-                                if ((isVideo && blockVideo) || (isAudio && blockAudio)) return;
+                                var isVid = this instanceof HTMLVideoElement;
+                                var isAud = this instanceof HTMLAudioElement;
+                                if ((isVid && isVideoBlocked()) || (isAud && isAudioBlocked())) return;
                                 if (origSet) origSet.call(this, v);
                             },
                             configurable: true
@@ -1183,9 +1191,9 @@ class MainActivity : AppCompatActivity() {
                         Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
                             get: function() { return null; },
                             set: function(v) {
-                                var isVideo = this instanceof HTMLVideoElement;
-                                var isAudio = this instanceof HTMLAudioElement;
-                                if ((isVideo && blockVideo) || (isAudio && blockAudio)) return;
+                                var isVid = this instanceof HTMLVideoElement;
+                                var isAud = this instanceof HTMLAudioElement;
+                                if ((isVid && isVideoBlocked()) || (isAud && isAudioBlocked())) return;
                                 if (origObjSet) origObjSet.call(this, v);
                             },
                             configurable: true
@@ -1198,7 +1206,7 @@ class MainActivity : AppCompatActivity() {
                     document.createElement = function(tagName) {
                         var el = origCreateElement(tagName);
                         if (typeof tagName === "string") {
-                            if ((tagName.toLowerCase() === "video" && blockVideo) || (tagName.toLowerCase() === "audio" && blockAudio)) {
+                            if ((tagName.toLowerCase() === "video" && isVideoBlocked()) || (tagName.toLowerCase() === "audio" && isAudioBlocked())) {
                                 neuter(el);
                             }
                         }
@@ -1206,18 +1214,55 @@ class MainActivity : AppCompatActivity() {
                     };
                 } catch(e) {}
                 
-                if (blockAudio) {
-                    try {
-                        window.AudioContext = function() { throw new Error("Audio blocked"); };
-                        window.webkitAudioContext = function() { throw new Error("Audio blocked"); };
-                    } catch(e) {}
-                }
+                try {
+                    var OrigAudioContext = window.AudioContext;
+                    window.AudioContext = function() { 
+                        if (isAudioBlocked()) throw new Error("Audio blocked"); 
+                        return new OrigAudioContext();
+                    };
+                } catch(e) {}
+                
+                try {
+                    var OrigWebkitAudioContext = window.webkitAudioContext;
+                    window.webkitAudioContext = function() { 
+                        if (isAudioBlocked()) throw new Error("Audio blocked"); 
+                        return new OrigWebkitAudioContext();
+                    };
+                } catch(e) {}
 
-                var blockedIframeHosts = ["youtube", "youtu.be", "vimeo", "dailymotion", "twitch", "tiktok", "netflix", "primevideo", "disney", "hulu"];
+                try {
+                    var OrigAudio = window.Audio;
+                    window.Audio = function() { 
+                        if (isAudioBlocked()) {
+                            var fakeAudio = document.createElement("audio");
+                            neuter(fakeAudio);
+                            return fakeAudio; 
+                        }
+                        return new OrigAudio();
+                    };
+                } catch(e) {}
+                
+                try {
+                    var OrigMediaSource = window.MediaSource;
+                    window.MediaSource = function() {
+                        if (isVideoBlocked() || isAudioBlocked()) throw new Error("MediaSource blocked");
+                        return new OrigMediaSource();
+                    };
+                } catch(e) {}
+
+                try {
+                    var OrigRTC = window.RTCPeerConnection;
+                    window.RTCPeerConnection = function() {
+                        if (isVideoBlocked() || isAudioBlocked()) throw new Error("WebRTC blocked");
+                        return new OrigRTC();
+                    };
+                } catch(e) {}
+
+                var blockedIframeHosts = ["youtube", "youtu.be", "vimeo", "dailymotion", "twitch", "tiktok", "netflix", "primevideo", "disney", "hulu", "spotify", "soundcloud", "mixcloud"];
                 function killMedia() {
-                    if (blockVideo) document.querySelectorAll("video").forEach(neuter);
-                    if (blockAudio) document.querySelectorAll("audio").forEach(neuter);
-                    if (blockVideo) {
+                    if (isVideoBlocked()) document.querySelectorAll("video").forEach(neuter);
+                    if (isAudioBlocked()) document.querySelectorAll("audio").forEach(neuter);
+                    if (isVideoBlocked() || isAudioBlocked()) {
                         document.querySelectorAll("iframe").forEach(function(f) {
                             var src = (f.src || "").toLowerCase();
                             if (blockedIframeHosts.some(function(h) { return src.includes(h); })) {
@@ -1228,35 +1273,15 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 function startObserving() {
-                    if (document.body) killMedia();
-                    var observer = new MutationObserver(function() { killMedia(); });
-                    observer.observe(document.documentElement, { childList: true, subtree: true });
+                    var observer = new MutationObserver(killMedia);
+                    observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
                 }
-                if (document.documentElement) startObserving();
-                else document.addEventListener("DOMContentLoaded", startObserving);
-
-                var blockedExt = [];
-                if (blockVideo) blockedExt = blockedExt.concat([".mp4", ".webm", ".m3u8", ".ts", ".mkv", ".mov", ".flv", ".wmv", ".3gp"]);
-                if (blockAudio) blockedExt = blockedExt.concat([".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]);
                 
-                try {
-                    var origFetch = window.fetch;
-                    window.fetch = function(url, options) {
-                        var s = (url || "").toString().toLowerCase();
-                        if (blockedExt.some(function(p) { return s.includes(p); })) {
-                            return Promise.reject(new Error("Media blocked"));
-                        }
-                        return origFetch.apply(this, arguments);
-                    };
-                } catch(e) {}
-                try {
-                    var origOpen = XMLHttpRequest.prototype.open;
-                    XMLHttpRequest.prototype.open = function(method, url) {
-                        var s = (url || "").toString().toLowerCase();
-                        if (blockedExt.some(function(p) { return s.includes(p); })) { return; }
-                        return origOpen.apply(this, arguments);
-                    };
-                } catch(e) {}
+                if (document.readyState === "loading") {
+                    document.addEventListener("DOMContentLoaded", function() { killMedia(); startObserving(); });
+                } else {
+                    killMedia(); startObserving();
+                }
             })();
         """.trimIndent()
     }
@@ -1278,6 +1303,17 @@ class MainActivity : AppCompatActivity() {
 
     inner class SafeWebViewClient : WebViewClient() {
         private var lastFallbackUrl: String? = null
+
+        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+            val url = request?.url?.toString()?.lowercase() ?: return super.shouldInterceptRequest(view, request)
+            if (videoBlocking && videoExtensions.any { url.endsWith(it) }) {
+                return WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
+            }
+            if (audioBlocking && audioExtensions.any { url.endsWith(it) }) {
+                return WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
+            }
+            return super.shouldInterceptRequest(view, request)
+        }
 
         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
             val url = request?.url.toString()
