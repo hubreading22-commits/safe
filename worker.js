@@ -42,18 +42,49 @@ export default {
         if (url.pathname === '/api/domains' && method === 'POST') {
             try {
                 const body = await request.json();
-                const incoming = body.domains || [];
-                if (!Array.isArray(incoming) || incoming.length === 0) {
+                
+                let newEntries = [];
+                if (body.blocked_sites && Array.isArray(body.blocked_sites)) {
+                    newEntries = body.blocked_sites;
+                } else if (body.domains && Array.isArray(body.domains)) {
+                    newEntries = body.domains.map(d => ({
+                        domain: String(d).toLowerCase().trim().replace(/^www\./, ''),
+                        url: '',
+                        title: '',
+                        description: '',
+                        timestamp: Date.now()
+                    }));
+                } else {
                     return jsonResponse({ ok: false, error: 'No domains provided' }, 400, corsHeaders);
                 }
-                const normalized = incoming
-                    .map(d => String(d).toLowerCase().trim().replace(/^www\./, ''))
-                    .filter(d => d.length > 0);
+
+                if (newEntries.length === 0) {
+                    return jsonResponse({ ok: false, error: 'Empty list' }, 400, corsHeaders);
+                }
+
+                newEntries.forEach(entry => {
+                    if(entry && entry.domain) {
+                        entry.domain = String(entry.domain).toLowerCase().trim().replace(/^www\./, '');
+                    }
+                });
+                newEntries = newEntries.filter(e => e && e.domain && e.domain.length > 0);
+
                 const pendingRaw = await kvGet('pending_domains', '[]');
                 const pending = JSON.parse(pendingRaw);
-                const merged = [...new Set([...pending, ...normalized])];
+
+                let merged = [...pending];
+                for (const entry of newEntries) {
+                    const exists = merged.find(item => {
+                        if (typeof item === 'string') return item === entry.domain;
+                        return item && item.domain === entry.domain;
+                    });
+                    if (!exists) {
+                        merged.push(entry);
+                    }
+                }
+
                 await kvPut('pending_domains', JSON.stringify(merged));
-                return jsonResponse({ ok: true, added: normalized.length, total_pending: merged.length }, 200, corsHeaders);
+                return jsonResponse({ ok: true, added: newEntries.length, total_pending: merged.length }, 200, corsHeaders);
             } catch (e) {
                 return jsonResponse({ ok: false, error: e.message }, 500, corsHeaders);
             }

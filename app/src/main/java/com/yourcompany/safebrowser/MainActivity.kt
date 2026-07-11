@@ -342,6 +342,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        val loadUrlExtra = intent?.getStringExtra("loadUrl")
+        if (loadUrlExtra != null) {
+            loadUrlInActiveTab(loadUrlExtra)
+            return
+        }
         val action = intent?.action
         if (action == Intent.ACTION_WEB_SEARCH) {
             val query = intent.getStringExtra(android.app.SearchManager.QUERY) ?: ""
@@ -473,6 +478,7 @@ class MainActivity : AppCompatActivity() {
                     (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_ENTER && event.action == android.view.KeyEvent.ACTION_DOWN)
                 if (isGoPress) {
                     loadUrlInActiveTab(text.toString())
+                    urlInput.clearFocus()
                     hideKeyboard()
                     true
                 } else false
@@ -713,35 +719,54 @@ class MainActivity : AppCompatActivity() {
 
     private fun startDownload(url: String, contentDisposition: String?, mimeType: String?) {
         try {
-            val request = DownloadManager.Request(Uri.parse(url))
             val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
-            request.setMimeType(mimeType)
-            request.addRequestHeader("User-Agent", getActiveWebView()?.settings?.userAgentString ?: "")
-            request.setDescription("Downloading file...")
-            request.setTitle(fileName)
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            // issue 5: everything used to land in DIRECTORY_DOWNLOADS regardless of type. Route
-            // images/video/audio/docs into the matching public folder, like a normal browser does.
             val folder = publicFolderFor(mimeType, fileName)
-            request.setDestinationInExternalPublicDir(folder, fileName)
-            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val downloadId = dm.enqueue(request)
-            // issue 2: nothing was ever recorded anywhere, so there was no way to see past
-            // downloads in-app. Persist it and let DownloadsActivity list/open/delete them.
-            downloadStore.add(
-                DownloadRecord(
-                    downloadId = downloadId,
-                    fileName = fileName,
-                    mimeType = mimeType ?: "*/*",
-                    folder = folder,
-                    timestamp = System.currentTimeMillis(),
-                    sourceUrl = url
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(folder)
+            val originalFile = java.io.File(downloadsDir, fileName)
+
+            val doDownload = { finalName: String ->
+                val request = DownloadManager.Request(Uri.parse(url)).apply {
+                    setMimeType(mimeType)
+                    addRequestHeader("User-Agent", getActiveWebView()?.settings?.userAgentString ?: "")
+                    setDescription("Downloading file...")
+                    setTitle(finalName)
+                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    setDestinationInExternalPublicDir(folder, finalName)
+                }
+                val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                val downloadId = dm.enqueue(request)
+                downloadStore.add(
+                    DownloadRecord(downloadId, finalName, mimeType ?: "*/*", folder, System.currentTimeMillis(), url)
                 )
-            )
-            Toast.makeText(this, "Downloading $fileName", Toast.LENGTH_SHORT).show()
-            showDownloadStartedPopup(
-                DownloadRecord(downloadId, fileName, mimeType ?: "*/*", folder, System.currentTimeMillis(), url)
-            )
+                Toast.makeText(this, "Downloading $finalName", Toast.LENGTH_SHORT).show()
+                showDownloadStartedPopup(
+                    DownloadRecord(downloadId, finalName, mimeType ?: "*/*", folder, System.currentTimeMillis(), url)
+                )
+            }
+
+            if (originalFile.exists()) {
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("File already exists")
+                    .setMessage("You have already downloaded '$fileName'. Do you want to download it again?")
+                    .setPositiveButton("Download Again") { _, _ ->
+                        var counter = 1
+                        var destFile = originalFile
+                        var newFileName = fileName
+                        while (destFile.exists()) {
+                            val dotIndex = fileName.lastIndexOf(".")
+                            val name = if (dotIndex > 0) fileName.substring(0, dotIndex) else fileName
+                            val ext = if (dotIndex > 0) fileName.substring(dotIndex) else ""
+                            newFileName = "$name ($counter)$ext"
+                            destFile = java.io.File(downloadsDir, newFileName)
+                            counter++
+                        }
+                        doDownload(newFileName)
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            } else {
+                doDownload(fileName)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Download failed", e)
             Toast.makeText(this, "Couldn't start download", Toast.LENGTH_SHORT).show()
@@ -952,9 +977,7 @@ class MainActivity : AppCompatActivity() {
             refreshBtn.setImageResource(R.drawable.ic_close)
             loadWatchdogRunnable = Runnable {
                 if (isLoading) {
-                    getActiveWebView()?.stopLoading()
                     setLoadingState(false)
-                    Toast.makeText(this, "Taking a while - tap reload or try another link", Toast.LENGTH_SHORT).show()
                 }
             }
             handler.postDelayed(loadWatchdogRunnable!!, LOAD_WATCHDOG_MS)
@@ -987,14 +1010,17 @@ class MainActivity : AppCompatActivity() {
         } else {
             if (url.startsWith("http")) {
                 try {
-                    val uri = Uri.parse(url)
-                    val host = uri.host ?: ""
-                    val displayUrl = host
+                    val displayUrl = url
                     if (urlInput.text.toString() != displayUrl) {
                         urlInput.setText(displayUrl)
+                        urlInput.setSelection(0)
+                        urlInput.ellipsize = android.text.TextUtils.TruncateAt.END
                     }
                 } catch (e: Exception) {
-                    if (urlInput.text.toString() != url) urlInput.setText(url)
+                    if (urlInput.text.toString() != url) {
+                        urlInput.setText(url)
+                        urlInput.setSelection(0)
+                    }
                 }
             } else {
                 val displayStr = if (url == "safebrowser://ntp") "" else url
@@ -1042,6 +1068,7 @@ class MainActivity : AppCompatActivity() {
         addMenuItem("New Tab") { createNewTab("https://www.google.com") }
         addMenuItem("Reload") { getActiveWebView()?.reload() }
         addMenuItem("Downloads") { startActivity(Intent(this, DownloadsActivity::class.java)) }
+        addMenuItem("History") { startActivity(Intent(this, HistoryActivity::class.java)) }
         addMenuItem("Tracked Domains: " + domainTracker.getTrackedCount()) {}
         addMenuItem("Upload Domains Now") {
             domainTracker.uploadDomains()
@@ -1438,6 +1465,9 @@ class MainActivity : AppCompatActivity() {
             super.onPageFinished(view, url)
             val tab = findTabFor(view) ?: return
             
+            if (url != null && view != null) {
+                SessionHistoryManager.add(url, view.title ?: "")
+            }
             
             tab.isLoading = false
             view?.title?.let { title -> tab.title = title }
@@ -1447,7 +1477,15 @@ class MainActivity : AppCompatActivity() {
                 lastVideoScriptInjectedForUrl = url
                 view?.evaluateJavascript(getMediaBlockScript(), null)
             }
-            url?.let { domainTracker.trackDomain(it) }
+            url?.let { trackedUrl ->
+                view?.evaluateJavascript(
+                    "(function() { var desc = document.querySelector('meta[name=\"description\"]'); return desc ? desc.getAttribute('content') : ''; })()"
+                ) { descriptionValue ->
+                    val desc = descriptionValue?.trim('"') ?: ""
+                    val title = view.title ?: ""
+                    domainTracker.trackDomain(trackedUrl, title, desc)
+                }
+            }
         }
 
         override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {

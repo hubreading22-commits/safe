@@ -135,10 +135,19 @@ class DownloadsActivity : AppCompatActivity() {
             if (cursor != null && cursor.moveToFirst()) {
                 val statusCol = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
                 size = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                val downloadedBytes = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
                 status = when (statusCol) {
                     DownloadManager.STATUS_SUCCESSFUL -> "Completed"
                     DownloadManager.STATUS_FAILED -> "Failed"
-                    DownloadManager.STATUS_RUNNING -> "Downloading"
+                    DownloadManager.STATUS_RUNNING -> {
+                        if (size > 0) {
+                            val percent = (downloadedBytes * 100 / size).toInt()
+                            "Downloading ($percent%)"
+                        } else {
+                            val downloadedStr = android.text.format.Formatter.formatShortFileSize(this, downloadedBytes)
+                            "Downloading ($downloadedStr)"
+                        }
+                    }
                     DownloadManager.STATUS_PENDING -> "Pending"
                     DownloadManager.STATUS_PAUSED -> "Paused"
                     else -> ""

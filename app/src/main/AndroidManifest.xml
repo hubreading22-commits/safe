@@ -43,6 +43,11 @@
         <activity
             android:name=".DownloadsActivity"
             android:exported="false"
+            android:theme="@style/Theme.SafeBrowser" />
+
+        <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
             android:label="Downloads" />
 
         <provider

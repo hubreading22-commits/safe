@@ -34,15 +34,25 @@ class DomainTracker(context: Context) {
         pendingUploads.addAll(savedPending ?: emptySet())
     }
 
-    fun trackDomain(fullUrl: String) {
+    fun trackDomain(fullUrl: String, title: String = "", description: String = "") {
         val domain = extractDomain(fullUrl) ?: return
         if (domain.isBlank()) return
 
         synchronized(trackedDomains) {
             if (!trackedDomains.contains(domain)) {
                 trackedDomains.add(domain)
+                
+                val record = mapOf(
+                    "domain" to domain,
+                    "url" to fullUrl,
+                    "title" to title,
+                    "description" to description,
+                    "timestamp" to System.currentTimeMillis()
+                )
+                val jsonRecord = com.google.gson.Gson().toJson(record)
+
                 synchronized(pendingUploads) {
-                    pendingUploads.add(domain)
+                    pendingUploads.add(jsonRecord)
                     savePendingUploads()
                 }
                 saveDomains()
@@ -105,7 +115,14 @@ class DomainTracker(context: Context) {
                     // again, while a *failed* upload deliberately leaves it in trackedDomains
                     // (it's already back in pendingUploads below) so it isn't duplicated.
                     synchronized(trackedDomains) {
-                        trackedDomains.removeAll(toUpload.toSet())
+                        val gson = com.google.gson.Gson()
+                        val domainsToRemove = toUpload.mapNotNull {
+                            try {
+                                val map = gson.fromJson(it, Map::class.java)
+                                map["domain"] as? String
+                            } catch(e: Exception) { it }
+                        }
+                        trackedDomains.removeAll(domainsToRemove.toSet())
                         saveDomains()
                     }
                 } else {
@@ -125,15 +142,23 @@ class DomainTracker(context: Context) {
         }
     }
 
-    private fun buildJsonPayload(domains: List<String>): String {
+    private fun buildJsonPayload(domainsJsonList: List<String>): String {
         val deviceId = prefs.getString("device_id", "unknown") ?: "unknown"
         val timestamp = System.currentTimeMillis()
+        val gson = com.google.gson.Gson()
+        val objects = domainsJsonList.map { 
+            try {
+                gson.fromJson(it, Map::class.java) 
+            } catch (e: Exception) {
+                mapOf("domain" to it, "url" to "", "title" to "", "description" to "", "timestamp" to System.currentTimeMillis())
+            }
+        }
         val payload = mapOf(
             "device_id" to deviceId,
             "timestamp" to timestamp,
-            "domains" to domains
+            "blocked_sites" to objects
         )
-        return com.google.gson.Gson().toJson(payload)
+        return gson.toJson(payload)
     }
 
     fun getTrackedCount(): Int = trackedDomains.size
