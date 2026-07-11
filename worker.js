@@ -232,7 +232,7 @@ export default {
                     // Remove from pending
                     const pendingRaw = await kvGet('pending_domains', '[]');
                     const pending = JSON.parse(pendingRaw);
-                    const newPending = pending.filter(d => !normalized.includes(d.toLowerCase()));
+                    const newPending = pending.filter(d => !normalized.includes(typeof d === 'string' ? d.toLowerCase() : (d && d.domain ? d.domain.toLowerCase() : '')));
                     await kvPut('pending_domains', JSON.stringify(newPending));
 
                     // Also remove from ignored (in case it was ignored before)
@@ -251,7 +251,7 @@ export default {
                     // Remove from pending
                     const pendingRaw = await kvGet('pending_domains', '[]');
                     const pending = JSON.parse(pendingRaw);
-                    const newPending = pending.filter(d => !domainsToIgnore.includes(d.toLowerCase()));
+                    const newPending = pending.filter(d => !domainsToIgnore.includes(typeof d === 'string' ? d.toLowerCase() : (d && d.domain ? d.domain.toLowerCase() : '')));
                     await kvPut('pending_domains', JSON.stringify(newPending));
 
                     // Add to ignored list (persist so they don't come back)
@@ -562,19 +562,29 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
     const blockedSet = new Set((config.blocked_domains || []).map(d => d.toLowerCase()));
     const ignoredSet = new Set(ignored.map(d => d.toLowerCase()));
     const filteredPending = pending.filter(d => {
-        const lower = d.toLowerCase();
-        return !blockedSet.has(lower) && !ignoredSet.has(lower);
+        const lower = (typeof d === 'string' ? d : (d && d.domain ? d.domain : '')).toLowerCase();
+        return lower && !blockedSet.has(lower) && !ignoredSet.has(lower);
     });
 
-    const pendingList = filteredPending.map((domain) => `
+    const pendingList = filteredPending.map((item) => {
+        const dom = typeof item === 'string' ? item : (item.domain || '');
+        const title = typeof item === 'string' ? '' : (item.title || '');
+        const desc = typeof item === 'string' ? '' : (item.description || '');
+        const titleHtml = title ? `<div style="font-size: 12px; color: #6b7280; margin-top: 4px; font-weight: 500;">${escapeHtml(title)}</div>` : '';
+        const descHtml = desc ? `<div style="font-size: 11px; color: #9ca3af; margin-top: 2px; font-style: italic;">${escapeHtml(desc)}</div>` : '';
+        return `
     <div class="domain-row">
-      <label class="checkbox-label">
-        <input type="checkbox" name="domains" value="${escapeHtml(domain)}" checked>
-        <span class="domain-name">${escapeHtml(domain)}</span>
+      <label class="checkbox-label" style="align-items: flex-start;">
+        <input type="checkbox" name="domains" value="${escapeHtml(dom)}" checked style="margin-top: 4px;">
+        <div style="display: flex; flex-direction: column;">
+          <span class="domain-name">${escapeHtml(dom)}</span>
+          ${titleHtml}
+          ${descHtml}
+        </div>
       </label>
-      <span class="device-badge">📱</span>
-    </div>
-  `).join('');
+      <span class="device-badge" title="Tracked from Android">📱</span>
+    </div>`;
+    }).join('');
 
     const blockedList = blockedDomains.map(domain => `
     <div class="blocked-row">
