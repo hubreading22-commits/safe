@@ -346,7 +346,7 @@ export default {
                     let reqs = JSON.parse(reqsRaw);
                     reqs = reqs.filter(d => d !== domain);
                     await kvPut('unblock_requests', JSON.stringify(reqs));
-                    return redirectToAdmin(url.origin, 'removed', 1);
+                    return redirectToAdmin(url.origin, 'req_denied', 1);
                 }
 
                 // ── update_keywords ──
@@ -575,7 +575,7 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
         return `
     <div class="domain-row">
       <label class="checkbox-label" style="align-items: flex-start;">
-        <input type="checkbox" name="domains" value="${escapeHtml(dom)}" checked style="margin-top: 4px;">
+        <input type="checkbox" name="domains" value="${escapeHtml(dom)}" style="margin-top: 4px;">
         <div style="display: flex; flex-direction: column;">
           <span class="domain-name">${escapeHtml(dom)}</span>
           ${titleHtml}
@@ -802,14 +802,11 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
           <div class="empty-state"><span class="icon">📭</span>No pending domains to review</div>
         ` : `
           <form method="POST" action="/admin/action">
-            <input type="hidden" name="action" value="add_domains">
             <div class="domain-list">${pendingList}</div>
-            <div class="action-bar"><button type="submit" class="btn btn-success">✓ Add Selected to Blocklist</button></div>
-          </form>
-          <form method="POST" action="/admin/action" style="margin-top:10px">
-            <input type="hidden" name="action" value="ignore_domains">
-            ${filteredPending.map((d) => `<input type="hidden" name="domains" value="${escapeHtml(d)}">`).join('')}
-            <button type="submit" class="btn btn-secondary">🗑 Ignore All</button>
+            <div class="action-bar" style="display:flex; gap:10px;">
+              <button type="submit" name="action" value="add_domains" class="btn btn-success">✓ Add Selected to Blocklist</button>
+              <button type="submit" name="action" value="ignore_domains" class="btn btn-secondary">🗑 Ignore Selected</button>
+            </div>
           </form>
         `}
       </div>
@@ -958,6 +955,7 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
         added: count + ' domain(s) added to blocklist',
         ignored: count + ' domain(s) ignored',
         removed: 'Domain removed from blocklist',
+        req_denied: 'Request removed from unblock list',
         unignored: 'Domain un-ignored and will show in pending again',
         updated: 'Settings updated successfully'
       };
