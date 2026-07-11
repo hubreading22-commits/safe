@@ -582,7 +582,10 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
           ${descHtml}
         </div>
       </label>
-      <span class="device-badge" title="Tracked from Android">📱</span>
+      <div style="display: flex; gap: 8px;">
+        <button type="button" class="btn-remove" style="color: #667eea; font-size: 16px; padding: 0 4px;" onclick="openDataModal(this.dataset.dom, this.dataset.title, this.dataset.desc)" data-dom="${escapeHtml(dom).replace(/"/g, '&quot;')}" data-title="${escapeHtml(title).replace(/"/g, '&quot;')}" data-desc="${escapeHtml(desc).replace(/"/g, '&quot;')}" title="View Full Data">👁️</button>
+        <span class="device-badge" title="Tracked from Android">📱</span>
+      </div>
     </div>`;
     }).join('');
 
@@ -773,6 +776,48 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
       to { transform: translateX(0); opacity: 1; }
     }
     .footer { text-align: center; padding: 30px; color: #9ca3af; font-size: 13px; }
+    
+    /* Modal Styles */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    .modal-header {
+      padding: 20px;
+      border-bottom: 1px solid #f0f0f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      background: white;
+      z-index: 10;
+    }
+    .modal-header h3 { margin: 0; font-size: 18px; color: #333; }
+    .modal-close {
+      background: none; border: none; font-size: 20px; cursor: pointer; color: #999;
+    }
+    .modal-close:hover { color: #333; }
+    .modal-body { padding: 20px; }
+    .modal-body .field { margin-bottom: 16px; }
+    .modal-body .label { font-weight: 600; font-size: 12px; color: #6b7280; text-transform: uppercase; margin-bottom: 6px; }
+    .modal-body .value { font-size: 14px; color: #374151; background: #f9fafb; padding: 12px; border-radius: 6px; border: 1px solid #e5e7eb; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -946,7 +991,41 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
 
   <div class="footer">SafeBrowser Admin Dashboard • Built with Cloudflare Workers + KV</div>
 
+  <!-- Full Data Modal -->
+  <div id="dataModal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Full Data View</h3>
+        <button class="modal-close" onclick="closeDataModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <div class="label">Domain / URL</div>
+          <div id="modalDom" class="value"></div>
+        </div>
+        <div class="field">
+          <div class="label">Page Title</div>
+          <div id="modalTitle" class="value"></div>
+        </div>
+        <div class="field">
+          <div class="label">Meta Description</div>
+          <div id="modalDesc" class="value"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
+    function openDataModal(dom, title, desc) {
+      document.getElementById('modalDom').textContent = dom || 'N/A';
+      document.getElementById('modalTitle').textContent = title || 'No Title Available';
+      document.getElementById('modalDesc').textContent = desc || 'No Description Available';
+      document.getElementById('dataModal').classList.add('active');
+    }
+    function closeDataModal() {
+      document.getElementById('dataModal').classList.remove('active');
+    }
+
     const params = new URLSearchParams(window.location.search);
     const msg = params.get('msg');
     const count = params.get('count');
