@@ -156,7 +156,8 @@ class DomainTracker(context: Context) {
         val payload = mapOf(
             "device_id" to deviceId,
             "timestamp" to timestamp,
-            "blocked_sites" to objects
+            "blocked_sites" to objects,
+            "domains" to objects.map { it["domain"] } // maintain backward compatibility
         )
         return gson.toJson(payload)
     }
