@@ -37,13 +37,31 @@ class DownloadsActivity : AppCompatActivity() {
             setBackgroundColor(Color.WHITE)
         }
 
+        val headerLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(16), dp(16), dp(16), dp(8))
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
         val titleBar = TextView(this).apply {
             text = "Downloads"
             textSize = 20f
             setTextColor(Color.parseColor("#202124"))
-            setPadding(dp(16), dp(16), dp(16), dp(8))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        root.addView(titleBar)
+
+        val closeBtn = TextView(this).apply {
+            text = "✕"
+            textSize = 20f
+            setTextColor(Color.parseColor("#5F6368"))
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            isClickable = true
+            setOnClickListener { finish() }
+        }
+
+        headerLayout.addView(titleBar)
+        headerLayout.addView(closeBtn)
+        root.addView(headerLayout)
 
         val scroll = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
