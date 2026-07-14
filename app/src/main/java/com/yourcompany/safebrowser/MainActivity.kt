@@ -690,7 +690,7 @@ class MainActivity : AppCompatActivity() {
                 // Trick Google OAuth into thinking this is a standard Chrome browser
                 userAgentString = userAgentString.replace("; wv", "").replace(" wv", "").replace("Version/4.0 ", "")
             }
-            addJavascriptInterface(ThemeColorInterface(), "AndroidTheme")
+            addJavascriptInterface(ThemeColorInterface(), "_cssi")
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             webViewClient = SafeWebViewClient()
@@ -711,6 +711,7 @@ class MainActivity : AppCompatActivity() {
             // page script, on every navigation including iframes, so sites like flyflix can't
             // win the race by starting playback before our blocking code exists.
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                WebViewCompat.addDocumentStartJavaScript(this, getBrowserCloakScript(), setOf("*"))
                 WebViewCompat.addDocumentStartJavaScript(this, getMediaBlockScript(), setOf("*"))
             }
             layoutParams = FrameLayout.LayoutParams(
@@ -1197,14 +1198,97 @@ class MainActivity : AppCompatActivity() {
 
     private fun getBlockedHtml(url: String): String {
         val domain = try { android.net.Uri.parse(url).host ?: url } catch (e: Exception) { url }
-        return "<html><head><title>Access Blocked</title><style>body{font-family:Arial,sans-serif;text-align:center;padding-top:100px;background:#f5f5f5;}.block-icon{font-size:80px;color:#d32f2f;}h1{color:#d32f2f;}p{color:#666;font-size:18px;}.back-link, .unblock-btn{display:inline-block;margin:10px;padding:12px 24px;background:#1976d2;color:white;text-decoration:none;border-radius:4px;border:none;font-size:16px;cursor:pointer;}.unblock-btn{background:#f57c00;}</style></head><body><div class=\"block-icon\">&#128683;</div><h1>Access Blocked</h1><p>This website or content has been blocked by your administrator.</p><br><a href=\"https://www.google.com\" class=\"back-link\">Go back to Google</a><button class=\"unblock-btn\" onclick=\"AndroidTheme.requestUnblock('${domain.replace("'", "\\'")}'); this.disabled=true; this.innerText='Request Sent';\">Request Unblock</button></body></html>"
+        return "<html><head><title>Access Blocked</title><style>body{font-family:Arial,sans-serif;text-align:center;padding-top:100px;background:#f5f5f5;}.block-icon{font-size:80px;color:#d32f2f;}h1{color:#d32f2f;}p{color:#666;font-size:18px;}.back-link, .unblock-btn{display:inline-block;margin:10px;padding:12px 24px;background:#1976d2;color:white;text-decoration:none;border-radius:4px;border:none;font-size:16px;cursor:pointer;}.unblock-btn{background:#f57c00;}</style></head><body><div class=\"block-icon\">&#128683;</div><h1>Access Blocked</h1><p>This website or content has been blocked by your administrator.</p><br><a href=\"https://www.google.com\" class=\"back-link\">Go back to Google</a><button class=\"unblock-btn\" onclick=\"_cssi.requestUnblock('${domain.replace("'", "\\'")}'); this.disabled=true; this.innerText='Request Sent';\">Request Unblock</button></body></html>"
+    }
+
+    /**
+     * Injects JS before any page script runs to make the WebView fingerprint
+     * indistinguishable from a real Chrome browser. Cloudflare Turnstile and
+     * similar bot-detection systems check for:
+     *   - navigator.webdriver (true in automated/WebView contexts)
+     *   - window.chrome object (present in real Chrome, absent in WebView)
+     *   - navigator.plugins (non-empty array in Chrome, empty in WebView)
+     *   - Non-standard window properties (like our JS interface)
+     */
+    private fun getBrowserCloakScript(): String {
+        return """
+            (function() {
+                try {
+                    // 1. Hide navigator.webdriver — Cloudflare checks this first
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: function() { return false; },
+                        configurable: true
+                    });
+
+                    // 2. Fake window.chrome object — real Chrome always has this
+                    if (!window.chrome) {
+                        window.chrome = {
+                            runtime: {
+                                connect: function() {},
+                                sendMessage: function() {}
+                            },
+                            loadTimes: function() { return {}; },
+                            csi: function() { return {}; }
+                        };
+                    }
+
+                    // 3. Fake navigator.plugins — real Chrome has at least a few
+                    try {
+                        Object.defineProperty(navigator, 'plugins', {
+                            get: function() {
+                                return [
+                                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                                    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+                                ];
+                            },
+                            configurable: true
+                        });
+                    } catch(e) {}
+
+                    // 4. Fake navigator.languages if missing
+                    try {
+                        if (!navigator.languages || navigator.languages.length === 0) {
+                            Object.defineProperty(navigator, 'languages', {
+                                get: function() { return ['en-US', 'en']; },
+                                configurable: true
+                            });
+                        }
+                    } catch(e) {}
+
+                    // 5. Hide our JS interface from enumeration
+                    try {
+                        if (window._cssi) {
+                            Object.defineProperty(window, '_cssi', {
+                                enumerable: false,
+                                configurable: false,
+                                writable: false,
+                                value: window._cssi
+                            });
+                        }
+                    } catch(e) {}
+
+                    // 6. Patch permissions API to not leak automation signals
+                    try {
+                        var origQuery = navigator.permissions.query;
+                        navigator.permissions.query = function(params) {
+                            if (params.name === 'notifications') {
+                                return Promise.resolve({ state: 'prompt', onchange: null });
+                            }
+                            return origQuery.call(navigator.permissions, params);
+                        };
+                    } catch(e) {}
+
+                } catch(e) {}
+            })();
+        """.trimIndent()
     }
 
     private fun getMediaBlockScript(): String {
         return """
             (function() {
-                function isVideoBlocked() { return window.AndroidTheme ? window.AndroidTheme.isVideoBlocked() : false; }
-                function isAudioBlocked() { return window.AndroidTheme ? window.AndroidTheme.isAudioBlocked() : false; }
+                function isVideoBlocked() { return window._cssi ? window._cssi.isVideoBlocked() : false; }
+                function isAudioBlocked() { return window._cssi ? window._cssi.isAudioBlocked() : false; }
                 
                 function neuter(el) {
                     try { if (el.pause) el.pause(); } catch(e) {}
@@ -1405,7 +1489,7 @@ class MainActivity : AppCompatActivity() {
                 <div class="advanced" onclick="toggleAdvanced()">Advanced</div>
                 <div id="advanced-div" class="hidden">
                     <p style="margin-top: 24px;">The server could not prove that it is <strong>$host</strong>. Its security certificate is not trusted.</p>
-                    <button class="proceed-btn" onclick="AndroidTheme.proceedSsl('$host')">Proceed to $host (unsafe)</button>
+                    <button class="proceed-btn" onclick="_cssi.proceedSsl('$host')">Proceed to $host (unsafe)</button>
                 </div>
                 </body></html>
             """.trimIndent()
@@ -1576,6 +1660,14 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
             return false
+        }
+
+        override fun onCloseWindow(window: WebView?) {
+            super.onCloseWindow(window)
+            val tab = findTabFor(window)
+            if (tab != null) {
+                closeTab(tab.id)
+            }
         }
 
         override fun onHideCustomView() {}
