@@ -588,7 +588,7 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
         return `
     <div class="domain-row">
       <label class="checkbox-label" style="align-items: flex-start;">
-        <input type="checkbox" name="domains" value="${escapeHtml(dom)}" style="margin-top: 4px;">
+        <input type="checkbox" name="domains" value="${escapeHtml(dom)}" class="pending-cb" style="margin-top: 4px;">
         <div style="display: flex; flex-direction: column;">
           <span class="domain-name">${escapeHtml(dom)}</span>
           ${titleHtml}
@@ -860,6 +860,12 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
           <div class="empty-state"><span class="icon">📭</span>No pending domains to review</div>
         ` : `
           <form method="POST" action="/admin/action">
+            <div style="padding-bottom: 12px; padding-left: 16px;">
+              <label class="checkbox-label" style="align-items: center; display: inline-flex;">
+                 <input type="checkbox" id="selectAllPending"> 
+                 <span style="font-size: 14px; font-weight: 600; color: #374151;">Select All</span>
+              </label>
+            </div>
             <div class="domain-list">${pendingList}</div>
             <div class="action-bar" style="display:flex; gap:10px;">
               <button type="submit" name="action" value="add_domains" class="btn btn-success">✓ Add Selected to Blocklist</button>
@@ -1059,6 +1065,33 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
       setTimeout(() => toast.remove(), 3000);
       window.history.replaceState({}, '', '/admin');
     }
+
+    // Select All Logic
+    const selectAllCb = document.getElementById('selectAllPending');
+    const pendingCbs = Array.from(document.querySelectorAll('.pending-cb'));
+    if (selectAllCb) {
+      selectAllCb.addEventListener('change', (e) => {
+        pendingCbs.forEach(cb => cb.checked = e.target.checked);
+      });
+    }
+
+    // Shift-click logic
+    let lastChecked = null;
+    pendingCbs.forEach(cb => {
+      cb.addEventListener('click', (e) => {
+        if (!lastChecked) {
+          lastChecked = cb;
+          return;
+        }
+        if (e.shiftKey) {
+          const start = pendingCbs.indexOf(cb);
+          const end = pendingCbs.indexOf(lastChecked);
+          const slice = pendingCbs.slice(Math.min(start, end), Math.max(start, end) + 1);
+          slice.forEach(c => c.checked = lastChecked.checked);
+        }
+        lastChecked = cb;
+      });
+    });
   </script>
 </body>
 </html>`;
