@@ -263,6 +263,19 @@ export default {
                     return redirectToAdmin(url.origin, 'ignored', domainsToIgnore.length);
                 }
 
+                // ── clear_pending_domains ──
+                if (actionStr === 'clear_pending_domains') {
+                    const domainsToClear = formData.getAll('domains').map(d => String(d).toLowerCase().trim());
+
+                    // Remove from pending without adding to any other list
+                    const pendingRaw = await kvGet('pending_domains', '[]');
+                    const pending = JSON.parse(pendingRaw);
+                    const newPending = pending.filter(d => !domainsToClear.includes(typeof d === 'string' ? d.toLowerCase() : (d && d.domain ? d.domain.toLowerCase() : '')));
+                    await kvPut('pending_domains', JSON.stringify(newPending));
+
+                    return redirectToAdmin(url.origin, 'cleared', domainsToClear.length);
+                }
+
                 // ── unignore_domain ──
                 if (actionStr === 'unignore_domain') {
                     const domain = String(formData.get('domain') || '').toLowerCase().trim();
@@ -851,6 +864,7 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
             <div class="action-bar" style="display:flex; gap:10px;">
               <button type="submit" name="action" value="add_domains" class="btn btn-success">✓ Add Selected to Blocklist</button>
               <button type="submit" name="action" value="ignore_domains" class="btn btn-secondary">🗑 Ignore Selected</button>
+              <button type="submit" name="action" value="clear_pending_domains" class="btn btn-danger">✕ Clear Selected</button>
             </div>
           </form>
         `}
