@@ -686,6 +686,9 @@ class MainActivity : AppCompatActivity() {
                 javaScriptCanOpenWindowsAutomatically = true
                 // issue 3: allow file:// access so saved downloads can be opened back in-page if needed.
                 allowFileAccess = true
+                
+                // Trick Google OAuth into thinking this is a standard Chrome browser
+                userAgentString = userAgentString.replace("; wv", "").replace(" wv", "")
             }
             addJavascriptInterface(ThemeColorInterface(), "AndroidTheme")
             CookieManager.getInstance().setAcceptCookie(true)
