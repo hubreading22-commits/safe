@@ -688,7 +688,7 @@ class MainActivity : AppCompatActivity() {
                 allowFileAccess = true
                 
                 // Trick Google OAuth into thinking this is a standard Chrome browser
-                userAgentString = userAgentString.replace("; wv", "").replace(" wv", "")
+                userAgentString = userAgentString.replace("; wv", "").replace(" wv", "").replace("Version/4.0 ", "")
             }
             addJavascriptInterface(ThemeColorInterface(), "AndroidTheme")
             CookieManager.getInstance().setAcceptCookie(true)
