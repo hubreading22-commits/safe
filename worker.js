@@ -165,7 +165,7 @@ export default {
                 const unblockReqs = JSON.parse(unblockReqsRaw);
                 const pending = JSON.parse(pendingRaw);
                 const ignored = JSON.parse(ignoredRaw);
-                const config = configRaw ? JSON.parse(configRaw) : {
+                let config = configRaw ? JSON.parse(configRaw) : {
                     version: '1.0.0',
                     updated: new Date().toISOString(),
                     blocked_domains: [],
@@ -173,6 +173,20 @@ export default {
                     video_blocking: true,
                     audio_blocking: true
                 };
+
+                // Migration: preserve legacy blocks/ignores
+                let needsConfigSave = false;
+                if (!config.manual_blocks) {
+                    config.manual_blocks = config.blocked_domains && config.blocked_domains.length > 0 ? [...config.blocked_domains] : [];
+                    needsConfigSave = true;
+                }
+                if (!config.manual_allows) {
+                    config.manual_allows = ignored && ignored.length > 0 ? [...ignored] : [];
+                    needsConfigSave = true;
+                }
+                if (needsConfigSave) {
+                    await env.SAFEBROWSER_KV.put('config', JSON.stringify(config));
+                }
 
                 const classRaw = await kvGet('domain_classifications', '{}');
                 const classifications = JSON.parse(classRaw);
