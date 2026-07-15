@@ -174,7 +174,11 @@ export default {
                     audio_blocking: true
                 };
 
-                const html = adminDashboard(pending, ignored, config, adminPassword, unblockReqs);
+                const classRaw = await kvGet('domain_classifications', '{}');
+                const classifications = JSON.parse(classRaw);
+                const policy = await getCategoryPolicy(env);
+
+                const html = adminDashboard(pending, ignored, config, adminPassword, unblockReqs, classifications, policy);
                 return new Response(html, {
                     headers: {
                         'Content-Type': 'text/html',
@@ -417,6 +421,34 @@ export default {
                     return redirectToAdmin(url.origin, 'added', 1);
                 }
 
+                // ── update_policy ──
+                if (actionStr === 'update_policy') {
+                    const category = String(formData.get('category'));
+                    const rule = String(formData.get('rule')); // "BLOCK" or "ALLOW"
+                    if (category && (rule === 'BLOCK' || rule === 'ALLOW')) {
+                        const policy = await getCategoryPolicy(env);
+                        policy[category] = rule;
+                        await kvPut('category_policy', JSON.stringify(policy));
+                        await rebuildEffectiveConfig(env);
+                        return redirectToAdmin(url.origin, 'updated');
+                    }
+                    return redirectToAdmin(url.origin);
+                }
+
+                // ── remove_classification ──
+                if (actionStr === 'remove_classification') {
+                    const dom = String(formData.get('domain')).toLowerCase();
+                    const classRaw = await kvGet('domain_classifications', '{}');
+                    const classifications = JSON.parse(classRaw);
+                    if (classifications[dom]) {
+                        delete classifications[dom];
+                        await kvPut('domain_classifications', JSON.stringify(classifications));
+                        await rebuildEffectiveConfig(env);
+                        return redirectToAdmin(url.origin, 'removed');
+                    }
+                    return redirectToAdmin(url.origin);
+                }
+
                 return redirectToAdmin(url.origin);
             } catch (e) {
                 // Return the actual error so we can debug
@@ -581,20 +613,37 @@ function loginPage() {
 
 // ── Admin Dashboard ─────────────────────────────────────────
 
-function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = []) {
+function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [], classifications = {}, policy = {}) {
     const blockedDomains = config.blocked_domains || [];
+    const manualBlocks = config.manual_blocks || [];
+    const manualAllows = config.manual_allows || [];
     const blockedKeywords = config.blocked_keywords || [];
     const videoBlocking = config.video_blocking !== false;
     const audioBlocking = config.audio_blocking !== false;
     const version = config.version || '1.0.0';
     const updated = config.updated || 'Never';
 
-    // Filter out domains already in blocklist or ignored
-    const blockedSet = new Set((config.blocked_domains || []).map(d => d.toLowerCase()));
-    const ignoredSet = new Set(ignored.map(d => d.toLowerCase()));
+    // Set of effectively blocked domains
+    const effectiveBlockedSet = new Set(blockedDomains.map(d => d.toLowerCase()));
+    
+    // Manual sets
+    const manualBlockSet = new Set(manualBlocks.map(d => d.toLowerCase()));
+    const manualAllowSet = new Set(manualAllows.map(d => d.toLowerCase()));
+    const ignoredSet = new Set(ignored.map(d => d.toLowerCase())); // legacy
+
+    const TAXONOMY_CATEGORIES = [
+        "EDUCATION", "GOVERNMENT", "NEWS", "TECHNOLOGY", "AI_TOOLS", "SEARCH_ENGINE",
+        "REFERENCE", "HEALTH", "FINANCE", "SHOPPING", "PRODUCTIVITY", "COMMUNICATION",
+        "SOCIAL_MEDIA", "FORUM_COMMUNITY", "VIDEO_STREAMING", "MUSIC_AUDIO",
+        "ENTERTAINMENT", "GAMING", "DATING", "GAMBLING", "ADULT_SEXUAL", "DRUGS",
+        "WEAPONS", "GRAPHIC_VIOLENCE", "HATE_EXTREMISM", "MALWARE_PHISHING",
+        "SCAM_FRAUD", "PROXY_VPN_BYPASS", "FILE_SHARING", "CLOUD_STORAGE",
+        "DOWNLOAD_SITE", "ADVERTISEMENT", "OTHER", "UNKNOWN"
+    ];
+
     const filteredPending = pending.filter(d => {
         const lower = (typeof d === 'string' ? d : (d && d.domain ? d.domain : '')).toLowerCase();
-        return lower && !blockedSet.has(lower) && !ignoredSet.has(lower);
+        return lower && !classifications[lower] && !manualBlockSet.has(lower) && !manualAllowSet.has(lower) && !ignoredSet.has(lower);
     });
 
     const pendingList = filteredPending.map((item) => {
@@ -606,454 +655,337 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
         return `
     <div class="domain-row">
       <label class="checkbox-label" style="align-items: flex-start;">
-        <input type="checkbox" name="domains" value="${escapeHtml(dom)}" class="pending-cb" style="margin-top: 4px;">
-        <div style="display: flex; flex-direction: column;">
-          <span class="domain-name">${escapeHtml(dom)}</span>
-          ${titleHtml}
-          ${descHtml}
+        <input type="checkbox" name="domains" value="${escapeHtml(dom)}" style="margin-top: 4px;">
+        <div style="display:flex; flex-direction:column; max-width: 80%;">
+            <span class="domain-name" style="word-break: break-all;">${escapeHtml(dom)}</span>
+            ${titleHtml}
+            ${descHtml}
         </div>
       </label>
-      <div style="display: flex; gap: 8px;">
-        <button type="button" class="btn-remove" style="color: #667eea; font-size: 16px; padding: 0 4px;" onclick="openDataModal(this.dataset.dom, this.dataset.title, this.dataset.desc)" data-dom="${escapeHtml(dom).replace(/"/g, '&quot;')}" data-title="${escapeHtml(title).replace(/"/g, '&quot;')}" data-desc="${escapeHtml(desc).replace(/"/g, '&quot;')}" title="View Full Data">👁️</button>
-        <span class="device-badge" title="Tracked from Android">📱</span>
-      </div>
+      <button type="button" class="btn-secondary btn-small" onclick="openDataModal('${escapeHtml(dom)}', '${escapeHtml(title).replace(/'/g, "\\'")}', '${escapeHtml(desc).replace(/'/g, "\\'")}')" style="align-self: flex-start; margin-top:2px;">Data</button>
     </div>`;
     }).join('');
 
-    const blockedList = blockedDomains.map(domain => `
-    <div class="blocked-row">
-      <span class="blocked-name">${escapeHtml(domain)}</span>
-      <form method="POST" action="/admin/action" class="inline-form">
+    const manualBlockListHtml = manualBlocks.map(d => `
+    <div class="domain-row">
+      <span class="domain-name">${escapeHtml(d)}</span>
+      <form method="POST" action="/admin/action" style="margin:0;">
         <input type="hidden" name="action" value="remove_domain">
-        <input type="hidden" name="domain" value="${escapeHtml(domain)}">
-        <button type="submit" class="btn-remove" title="Remove">✕</button>
+        <input type="hidden" name="domain" value="${escapeHtml(d)}">
+        <button type="submit" class="btn-danger btn-small">Remove</button>
       </form>
-    </div>
-  `).join('');
+    </div>`).join('');
 
-    // pending inputs are inlined in the template below
+    const manualAllowListHtml = manualAllows.map(d => `
+    <div class="domain-row">
+      <span class="domain-name">${escapeHtml(d)}</span>
+      <form method="POST" action="/admin/action" style="margin:0;">
+        <input type="hidden" name="action" value="unignore_domain">
+        <input type="hidden" name="domain" value="${escapeHtml(d)}">
+        <button type="submit" class="btn-danger btn-small">Remove</button>
+      </form>
+    </div>`).join('');
+
+    const policyCardsHtml = TAXONOMY_CATEGORIES.map(cat => {
+        const currentRule = policy[cat] || (["ADULT_SEXUAL", "DRUGS", "WEAPONS", "GRAPHIC_VIOLENCE", "HATE_EXTREMISM", "MALWARE_PHISHING", "SCAM_FRAUD", "GAMBLING", "DATING"].includes(cat) ? "BLOCK" : "ALLOW");
+        const isBlock = currentRule === "BLOCK";
+        
+        return `
+        <div class="policy-card">
+            <div class="policy-cat-name">${escapeHtml(cat.replace(/_/g, ' '))}</div>
+            <div class="policy-toggle">
+                <form method="POST" action="/admin/action" style="display:inline;">
+                    <input type="hidden" name="action" value="update_policy">
+                    <input type="hidden" name="category" value="${escapeHtml(cat)}">
+                    <input type="hidden" name="rule" value="ALLOW">
+                    <button type="submit" class="btn-toggle ${!isBlock ? 'active-allow' : ''}">ALLOW</button>
+                </form>
+                <form method="POST" action="/admin/action" style="display:inline;">
+                    <input type="hidden" name="action" value="update_policy">
+                    <input type="hidden" name="category" value="${escapeHtml(cat)}">
+                    <input type="hidden" name="rule" value="BLOCK">
+                    <button type="submit" class="btn-toggle ${isBlock ? 'active-block' : ''}">BLOCK</button>
+                </form>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Pre-build classifications grouped by category
+    const classGrouped = {};
+    for (const [dom, meta] of Object.entries(classifications)) {
+        const cat = meta.category || "UNKNOWN";
+        if (!classGrouped[cat]) classGrouped[cat] = [];
+        classGrouped[cat].push({ domain: dom, ...meta });
+    }
+
+    // Classifications view
+    const classCategories = Object.keys(classGrouped).sort();
+    let classOptionsHtml = '<option value="ALL">-- Show All Categories --</option>';
+    let classListHtml = '';
+
+    classCategories.forEach(cat => {
+        classOptionsHtml += `<option value="${escapeHtml(cat)}">${escapeHtml(cat)} (${classGrouped[cat].length})</option>`;
+        
+        classGrouped[cat].forEach(c => {
+            const isBlocked = effectiveBlockedSet.has(c.domain.toLowerCase()) ? '<span class="badge badge-block">BLOCKED</span>' : '<span class="badge badge-allow">ALLOWED</span>';
+            classListHtml += `
+            <div class="domain-row class-row" data-category="${escapeHtml(cat)}">
+                <div style="display:flex; flex-direction:column;">
+                    <span class="domain-name" style="word-break: break-all;">${escapeHtml(c.domain)} ${isBlocked}</span>
+                    <div style="font-size: 11px; color: #6b7280; margin-top: 2px;">
+                        <strong>${escapeHtml(cat)}</strong> | Conf: ${(c.confidence*100).toFixed(0)}%
+                        <br/><i style="color:#9ca3af">${escapeHtml(c.reason || '')}</i>
+                    </div>
+                </div>
+                <form method="POST" action="/admin/action" style="margin:0;">
+                    <input type="hidden" name="action" value="remove_classification">
+                    <input type="hidden" name="domain" value="${escapeHtml(c.domain)}">
+                    <button type="submit" class="btn-danger btn-small">Delete</button>
+                </form>
+            </div>`;
+        });
+    });
+
+    const unblockReqsHtml = unblockReqs.map(req => `
+    <div class="domain-row" style="flex-direction:column; align-items:flex-start;">
+      <div style="display:flex; justify-content:space-between; width:100%; margin-bottom:8px;">
+        <span class="domain-name">${escapeHtml(req.domain)}</span>
+        <span style="font-size:12px; color:#888;">${new Date(req.time).toLocaleString()}</span>
+      </div>
+      <div style="font-size:13px; margin-bottom:10px; background:#f9fafb; padding:8px; border-radius:6px; border:1px solid #e5e7eb; width:100%;">
+        <strong>Reason:</strong> ${escapeHtml(req.reason)}<br>
+        <strong>Email:</strong> ${escapeHtml(req.email)}
+      </div>
+      <div style="display:flex; gap:10px;">
+        <form method="POST" action="/admin/action" style="margin:0;">
+          <input type="hidden" name="action" value="approve_unblock">
+          <input type="hidden" name="domain" value="${escapeHtml(req.domain)}">
+          <button type="submit" class="btn-primary btn-small">Approve & Allow</button>
+        </form>
+        <form method="POST" action="/admin/action" style="margin:0;">
+          <input type="hidden" name="action" value="deny_unblock">
+          <input type="hidden" name="domain" value="${escapeHtml(req.domain)}">
+          <button type="submit" class="btn-danger btn-small">Deny</button>
+        </form>
+      </div>
+    </div>`).join('');
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SafeBrowser Admin Dashboard</title>
+  <title>SafeBrowser Dashboard</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f5f7fa;
-      color: #333;
-      line-height: 1.6;
-    }
-    .header {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 30px 0;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-    }
-    .header-inner {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .header h1 { font-size: 28px; font-weight: 700; }
-    .header-meta { text-align: right; font-size: 13px; opacity: 0.9; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 30px 20px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-    @media (max-width: 900px) {
-      .grid { grid-template-columns: 1fr; }
-      .stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
-      .header-inner { flex-direction: column; gap: 10px; text-align: center; }
-      .header-meta { text-align: center; }
-    }
-    .card {
-      background: white;
-      border-radius: 16px;
-      padding: 24px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-      border: 1px solid #e8ecf1;
-    }
-    .card h2 { font-size: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
-    .badge {
-      background: #667eea;
-      color: white;
-      font-size: 12px;
-      padding: 2px 10px;
-      border-radius: 20px;
-      font-weight: 600;
-    }
-    .badge.green { background: #10b981; }
-    .badge.red { background: #ef4444; }
-    .badge.gray { background: #9ca3af; }
-    .domain-list {
-      max-height: 400px;
-      overflow-y: auto;
-      border: 1px solid #e8ecf1;
-      border-radius: 10px;
-      margin-bottom: 16px;
-    }
-    .domain-row, .blocked-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 16px;
-      border-bottom: 1px solid #f0f0f0;
-      transition: background 0.15s;
-    }
-    .domain-row:hover, .blocked-row:hover { background: #f8fafc; }
-    .domain-row:last-child, .blocked-row:last-child { border-bottom: none; }
-    .checkbox-label { display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 1; }
-    .checkbox-label input[type="checkbox"] { width: 18px; height: 18px; accent-color: #667eea; cursor: pointer; }
-    .domain-name { font-size: 14px; color: #374151; font-weight: 500; }
-    .device-badge { font-size: 14px; opacity: 0.6; }
-    .blocked-name { font-size: 14px; color: #374151; font-weight: 500; flex: 1; }
-    .btn {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(102,126,234,0.35); }
-    .btn-success { background: #10b981; color: white; }
-    .btn-success:hover { background: #059669; }
-    .btn-danger { background: #ef4444; color: white; }
-    .btn-danger:hover { background: #dc2626; }
-    .btn-secondary { background: #f3f4f6; color: #6b7280; }
-    .btn-secondary:hover { background: #e5e7eb; }
-    .btn-remove { background: none; border: none; color: #ef4444; font-size: 16px; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
-    .btn-remove:hover { background: #fef2f2; }
-    .inline-form { display: inline; }
-    .empty-state { text-align: center; padding: 40px 20px; color: #9ca3af; font-size: 14px; }
-    .empty-state .icon { font-size: 40px; margin-bottom: 12px; display: block; }
-    .action-bar { display: flex; gap: 10px; flex-wrap: wrap; }
-    .input-group { display: flex; gap: 10px; margin-bottom: 16px; }
-    .input-group input {
-      flex: 1;
-      padding: 10px 14px;
-      border: 2px solid #e5e7eb;
-      border-radius: 8px;
-      font-size: 14px;
-    }
-    .input-group input:focus { outline: none; border-color: #667eea; }
-    .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
-    .stat-card { background: white; border-radius: 12px; padding: 20px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.04); border: 1px solid #e8ecf1; }
-    .stat-number { font-size: 32px; font-weight: 700; color: #667eea; line-height: 1; }
-    .stat-label { font-size: 12px; color: #9ca3af; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
-    .settings-row:last-child { border-bottom: none; }
-    .toggle-switch {
-      position: relative;
-      width: 48px;
-      height: 26px;
-      background: #e5e7eb;
-      border-radius: 13px;
-      cursor: pointer;
-      transition: background 0.2s;
-      appearance: none;
-      -webkit-appearance: none;
-    }
-    .toggle-switch:checked { background: #667eea; }
-    .toggle-switch::after {
-      content: '';
-      position: absolute;
-      width: 22px;
-      height: 22px;
-      background: white;
-      border-radius: 50%;
-      top: 2px;
-      left: 2px;
-      transition: transform 0.2s;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    }
-    .toggle-switch:checked::after { transform: translateX(22px); }
-    .textarea {
-      width: 100%;
-      padding: 12px;
-      border: 2px solid #e5e7eb;
-      border-radius: 8px;
-      font-size: 14px;
-      font-family: inherit;
-      resize: vertical;
-      min-height: 80px;
-    }
-    .textarea:focus { outline: none; border-color: #667eea; }
-    .toast {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: #10b981;
-      color: white;
-      padding: 14px 24px;
-      border-radius: 10px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-      font-weight: 600;
-      animation: slideIn 0.3s ease;
-      z-index: 1000;
-    }
-    @keyframes slideIn {
-      from { transform: translateX(100px); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-    .footer { text-align: center; padding: 30px; color: #9ca3af; font-size: 13px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; color: #1f2937; padding: 20px; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 30px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 24px; font-weight: 700; }
+    .stats { font-size: 14px; opacity: 0.9; margin-top: 5px; }
     
-    /* Modal Styles */
-    .modal-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.5);
-      z-index: 2000;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-    .modal-overlay.active { display: flex; }
-    .modal-content {
-      background: white;
-      border-radius: 12px;
-      width: 100%;
-      max-width: 600px;
-      max-height: 80vh;
-      overflow-y: auto;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-    }
-    .modal-header {
-      padding: 20px;
-      border-bottom: 1px solid #f0f0f0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      position: sticky;
-      top: 0;
-      background: white;
-      z-index: 10;
-    }
-    .modal-header h3 { margin: 0; font-size: 18px; color: #333; }
-    .modal-close {
-      background: none; border: none; font-size: 20px; cursor: pointer; color: #999;
-    }
-    .modal-close:hover { color: #333; }
-    .modal-body { padding: 20px; }
-    .modal-body .field { margin-bottom: 16px; }
-    .modal-body .label { font-weight: 600; font-size: 12px; color: #6b7280; text-transform: uppercase; margin-bottom: 6px; }
-    .modal-body .value { font-size: 14px; color: #374151; background: #f9fafb; padding: 12px; border-radius: 6px; border: 1px solid #e5e7eb; word-break: break-all; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    @media(min-width: 1024px) { .grid { grid-template-columns: 1fr 1fr; } }
+    @media(min-width: 1440px) { .grid { grid-template-columns: 1fr 1fr 1fr; } }
+    
+    .card { background: white; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden; display: flex; flex-direction: column;}
+    .card-header { padding: 16px 20px; border-bottom: 1px solid #f3f4f6; background: #fafafa; display: flex; justify-content: space-between; align-items: center; }
+    .card-header h2 { font-size: 16px; font-weight: 600; color: #374151; }
+    .badge { background: #e5e7eb; padding: 4px 8px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #4b5563; }
+    .badge-block { background: #fee2e2; color: #991b1b; }
+    .badge-allow { background: #d1fae5; color: #065f46; }
+    
+    .card-body { padding: 20px; max-height: 500px; overflow-y: auto; flex: 1;}
+    .domain-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #f3f4f6; }
+    .domain-row:last-child { border-bottom: none; }
+    .domain-name { font-weight: 500; font-size: 14px; color: #111827; }
+    
+    .checkbox-label { display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 1; }
+    
+    button { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.2s; }
+    .btn-primary { background: #667eea; color: white; }
+    .btn-primary:hover { background: #5a67d8; }
+    .btn-secondary { background: #e5e7eb; color: #374151; }
+    .btn-secondary:hover { background: #d1d5db; }
+    .btn-danger { background: #fee2e2; color: #dc2626; }
+    .btn-danger:hover { background: #fecaca; }
+    .btn-small { padding: 6px 12px; font-size: 12px; }
+    
+    input[type="text"] { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; margin-bottom: 10px; }
+    input[type="text"]:focus { outline: none; border-color: #667eea; ring: 2px solid #e0e7ff; }
+    select { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; margin-bottom: 10px; background: white;}
+    
+    .toast { position: fixed; bottom: 20px; right: 20px; background: #10b981; color: white; padding: 12px 24px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transform: translateY(100px); opacity: 0; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+    .toast.show { transform: translateY(0); opacity: 1; }
+
+    /* Policy Toggles */
+    .policy-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .policy-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; display: flex; justify-content: space-between; align-items: center;}
+    .policy-cat-name { font-weight: 600; font-size: 12px; color: #374151; }
+    .policy-toggle { display: flex; gap: 4px; background: #e5e7eb; padding: 3px; border-radius: 6px; }
+    .btn-toggle { padding: 4px 10px; font-size: 11px; border-radius: 4px; background: transparent; color: #6b7280; font-weight: 600; }
+    .btn-toggle.active-block { background: #ef4444; color: white; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+    .btn-toggle.active-allow { background: #10b981; color: white; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+
+    /* Modal */
+    .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 50;}
+    .modal-overlay.active { opacity: 1; pointer-events: auto; }
+    .modal-content { background: white; padding: 24px; border-radius: 12px; width: 90%; max-width: 500px; transform: scale(0.95); transition: transform 0.2s; }
+    .modal-overlay.active .modal-content { transform: scale(1); }
+    .modal-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
   </style>
 </head>
 <body>
+
   <div class="header">
-    <div class="header-inner">
-      <div><h1>🛡️ SafeBrowser Admin</h1></div>
-      <div class="header-meta">
-        <div>Version: <strong>${escapeHtml(version)}</strong></div>
-        <div>Updated: <strong>${escapeHtml(updated)}</strong></div>
-      </div>
+    <div>
+      <h1>🛡️ SafeBrowser Admin</h1>
+      <div class="stats">Effective Config v${escapeHtml(version)} • Last compiled: ${new Date(updated).toLocaleString()}</div>
     </div>
+    <form method="POST" action="/admin/action" style="margin:0;">
+      <input type="hidden" name="action" value="update_config">
+      <button type="submit" class="btn-primary" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4);">Trigger Manual Rebuild</button>
+    </form>
   </div>
 
-  <div class="container">
-    <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
-      <div class="stat-card"><div class="stat-number">${filteredPending.length}</div><div class="stat-label">Pending</div></div>
-      <div class="stat-card"><div class="stat-number">${blockedDomains.length}</div><div class="stat-label">Blocked</div></div>
-      <div class="stat-card"><div class="stat-number">${ignored.length}</div><div class="stat-label">Ignored</div></div>
-      <div class="stat-card"><div class="stat-number">${blockedKeywords.length}</div><div class="stat-label">Keywords</div></div>
+  <div class="grid">
+    
+    <!-- AI Category Policies -->
+    <div class="card" style="grid-column: 1 / -1;">
+      <div class="card-header">
+        <h2>🧠 AI Category Policies</h2>
+        <span class="badge" style="background:#e0e7ff; color:#4f46e5;">Auto-blocks based on AI</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size:13px; color:#6b7280; margin-bottom:15px;">Configure the default action for each category. When the AI classifies an unknown domain, it checks these rules.</p>
+        <div class="policy-grid">
+            ${policyCardsHtml}
+        </div>
+      </div>
     </div>
 
-    <div class="grid">
-      <!-- Pending Domains -->
-      <div class="card">
-        <h2>📥 Pending Domains <span class="badge ${filteredPending.length > 0 ? 'red' : 'gray'}">${filteredPending.length}</span></h2>
-        ${filteredPending.length === 0 ? `
-          <div class="empty-state"><span class="icon">📭</span>No pending domains to review</div>
-        ` : `
-          <form method="POST" action="/admin/action">
-            <div style="padding-bottom: 12px; padding-left: 16px;">
-              <label class="checkbox-label" style="align-items: center; display: inline-flex;">
-                 <input type="checkbox" id="selectAllPending"> 
-                 <span style="font-size: 14px; font-weight: 600; color: #374151;">Select All</span>
-              </label>
-            </div>
-            <div class="domain-list">${pendingList}</div>
-            <div class="action-bar" style="display:flex; gap:10px;">
-              <button type="submit" name="action" value="add_domains" class="btn btn-success">✓ Add Selected to Blocklist</button>
-              <button type="submit" name="action" value="ignore_domains" class="btn btn-secondary">🗑 Ignore Selected</button>
-              <button type="submit" name="action" value="clear_pending_domains" class="btn btn-danger">✕ Clear Selected</button>
-            </div>
-          </form>
-        `}
+    <!-- Domain Classifications -->
+    <div class="card">
+      <div class="card-header">
+        <h2>🤖 AI Classifications</h2>
+        <span class="badge">${Object.keys(classifications).length} domains</span>
       </div>
+      <div class="card-body">
+        <select id="classFilter" onchange="filterClassifications()">
+            ${classOptionsHtml}
+        </select>
+        <div id="classList">
+            ${classListHtml || '<div style="color:#888; font-size:14px; text-align:center; padding:20px;">No domains classified yet</div>'}
+        </div>
+      </div>
+    </div>
 
-      <!-- Blocked Domains -->
-      <div class="card">
-        <h2>🚫 Blocked Domains <span class="badge">${blockedDomains.length}</span></h2>
-        <form method="POST" action="/admin/action" class="input-group">
+    <!-- Pending Domains -->
+    <div class="card">
+      <div class="card-header">
+        <h2>📥 Pending AI Analysis</h2>
+        <span class="badge">${filteredPending.length} waiting</span>
+      </div>
+      <div class="card-body" style="padding:0;">
+        <form method="POST" action="/admin/action" id="pendingForm" style="height:100%; display:flex; flex-direction:column;">
+          <div style="padding:15px; border-bottom:1px solid #f3f4f6; background:#f9fafb; display:flex; gap:10px;">
+            <button type="button" class="btn-secondary" onclick="selectAll()">Select All</button>
+            <button type="submit" name="action" value="add_domains" class="btn-danger" style="flex:1;">Force Block</button>
+            <button type="submit" name="action" value="ignore_domains" class="btn-primary" style="flex:1;">Force Allow</button>
+            <button type="submit" name="action" value="clear_selected_pending" class="btn-secondary" style="flex:1;">Remove</button>
+          </div>
+          <div style="padding:20px; overflow-y:auto; flex:1;">
+            ${pendingList || '<div style="color:#888; font-size:14px; text-align:center; padding:20px;">No pending domains</div>'}
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Manual Blocks -->
+    <div class="card">
+      <div class="card-header">
+        <h2>⛔ Manual Blocks</h2>
+        <span class="badge-block">${manualBlocks.length} forced blocks</span>
+      </div>
+      <div class="card-body">
+        <form method="POST" action="/admin/action" style="margin-bottom: 20px; display:flex; gap:10px;">
           <input type="hidden" name="action" value="add_manual_domain">
-          <input type="text" name="domain" placeholder="Add domain manually (e.g. example.com)" required>
-          <button type="submit" class="btn btn-primary">+ Add</button>
+          <input type="text" name="domain" placeholder="example.com" required style="margin:0;">
+          <button type="submit" class="btn-primary">Add Block</button>
         </form>
-        <div class="domain-list">
-          ${blockedDomains.length === 0 ? `<div class="empty-state"><span class="icon">🌐</span>No domains blocked yet</div>` : blockedList}
-        </div>
-      </div>
-
-      <!-- Ignored Domains -->
-      <div class="card">
-        <h2>
-          🚫 Ignored Domains
-          <span class="badge gray">${ignored.length}</span>
-        </h2>
-        <div class="domain-list">
-          ${ignored.length === 0 ? `
-            <div class="empty-state">
-              <span class="icon">🤷</span>
-              No ignored domains
-            </div>
-          ` : ignored.map(domain => `
-            <div class="blocked-row">
-              <span class="blocked-name">${escapeHtml(domain)}</span>
-              <form method="POST" action="/admin/action" class="inline-form">
-                <input type="hidden" name="action" value="unignore_domain">
-                <input type="hidden" name="domain" value="${escapeHtml(domain)}">
-                <button type="submit" class="btn-remove" title="Un-ignore">↩</button>
-              </form>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-
-      <!-- Settings -->
-      <div class="card">
-        <h2>⚙️ Blocklist Settings</h2>
-        <form method="POST" action="/admin/action">
-          <input type="hidden" name="action" value="update_keywords">
-          <div style="margin-bottom: 16px">
-            <label style="font-size: 13px; color: #6b7280; font-weight: 600; display: block; margin-bottom: 8px;">BLOCKED KEYWORDS (comma-separated)</label>
-            <textarea name="keywords" class="textarea" placeholder="e.g. porn, gambling, torrent">${escapeHtml(blockedKeywords.join(', '))}</textarea>
-          </div>
-          <div class="settings-row">
-            <div>
-              <div style="font-weight: 600; color: #374151;">Video Blocking</div>
-              <div style="font-size: 12px; color: #9ca3af;">Block all HTML5 video playback</div>
-            </div>
-            <input type="checkbox" name="video_blocking" class="toggle-switch" ${videoBlocking ? 'checked' : ''}>
-          </div>
-          <div class="settings-row">
-            <div>
-              <div style="font-weight: 600; color: #374151;">Audio Blocking</div>
-              <div style="font-size: 12px; color: #9ca3af;">Block all background audio and music</div>
-            </div>
-            <input type="checkbox" name="audio_blocking" class="toggle-switch" ${audioBlocking ? 'checked' : ''}>
-          </div>
-          <div style="margin-top: 16px"><button type="submit" class="btn btn-primary">💾 Save Settings</button></div>
-        </form>
-      </div>
-
-
-      <!-- Unblock Requests -->
-      <div class="card">
-        <h2>🔓 Unblock Requests <span class="badge ${unblockReqs.length > 0 ? 'red' : 'gray'}">${unblockReqs.length}</span></h2>
-        <div class="domain-list">
-          ${unblockReqs.length === 0 ? `<div class="empty-state"><span class="icon">✅</span>No unblock requests</div>` : unblockReqs.map(domain => `
-            <div class="blocked-row">
-              <span class="blocked-name">${escapeHtml(domain)}</span>
-              <div>
-                  <form method="POST" action="/admin/action" class="inline-form">
-                    <input type="hidden" name="action" value="approve_unblock">
-                    <input type="hidden" name="domain" value="${escapeHtml(domain)}">
-                    <button type="submit" class="btn-remove" style="color:#10b981;" title="Approve & Unblock">✓</button>
-                  </form>
-                  <form method="POST" action="/admin/action" class="inline-form">
-                    <input type="hidden" name="action" value="deny_unblock">
-                    <input type="hidden" name="domain" value="${escapeHtml(domain)}">
-                    <button type="submit" class="btn-remove" title="Deny & Dismiss">✕</button>
-                  </form>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-
-      <!-- Quick Shortcuts -->
-      <div class="card">
-        <h2>🔗 Quick Shortcuts <span class="badge">${(config.shortcuts || []).length}</span></h2>
-        <form method="POST" action="/admin/action" class="input-group">
-          <input type="hidden" name="action" value="add_shortcut">
-          <input type="text" name="title" placeholder="Title (e.g. Google)" required style="width: 30%">
-          <input type="url" name="url" placeholder="https://..." required style="width: 50%">
-          <input type="text" name="icon" placeholder="Icon (e.g. 🔍)" style="width: 20%">
-          <button type="submit" class="btn btn-primary">+ Add</button>
-        </form>
-        <div class="domain-list">
-          ${(config.shortcuts || []).length === 0 ? `<div class="empty-state"><span class="icon">🔗</span>No shortcuts configured</div>` : (config.shortcuts || []).map(s => `
-            <div class="blocked-row">
-              <span class="blocked-name">${escapeHtml(s.icon)} ${escapeHtml(s.title)} <small style="opacity:0.5">(${escapeHtml(s.url)})</small></span>
-              <form method="POST" action="/admin/action" class="inline-form">
-                <input type="hidden" name="action" value="remove_shortcut">
-                <input type="hidden" name="url" value="${escapeHtml(s.url)}">
-                <button type="submit" class="btn-remove" title="Remove">✕</button>
-              </form>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-
-      <!-- Quick Info -->
-      <div class="card">
-        <h2>📊 Quick Info</h2>
-        <div style="font-size: 14px; color: #6b7280; line-height: 2;">
-          <div><strong>API:</strong> <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:12px;">POST /api/domains</code></div>
-          <div><strong>Config:</strong> <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:12px;">GET /api/config</code></div>
-          <div><strong>Debug:</strong> <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:12px;">GET /debug</code></div>
-          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0f0f0;">
-            <strong>Android URLs:</strong>
-            <div style="margin-top: 8px; background: #f8fafc; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 12px; line-height: 1.8;">
-              UPLOAD_URL = "https://browser.proxybotkk.workers.dev/api/domains"<br>
-              REMOTE_CONFIG_URL = "https://browser.proxybotkk.workers.dev/api/config"
-            </div>
-          </div>
-        </div>
+        ${manualBlockListHtml || '<div style="color:#888; font-size:14px; text-align:center; padding:20px;">No manual blocks</div>'}
       </div>
     </div>
+    
+    <!-- Manual Allows -->
+    <div class="card">
+      <div class="card-header">
+        <h2>✅ Manual Allows</h2>
+        <span class="badge-allow">${manualAllows.length} forced allows</span>
+      </div>
+      <div class="card-body">
+        <form method="POST" action="/admin/action" style="margin-bottom: 20px; display:flex; gap:10px;">
+          <input type="hidden" name="action" value="add_manual_allow">
+          <input type="text" name="domain" placeholder="example.com" required style="margin:0;">
+          <button type="submit" class="btn-primary">Add Allow</button>
+        </form>
+        ${manualAllowListHtml || '<div style="color:#888; font-size:14px; text-align:center; padding:20px;">No manual allows</div>'}
+      </div>
+    </div>
+
+    <!-- Unblock Requests -->
+    <div class="card">
+      <div class="card-header">
+        <h2>🔓 Unblock Requests</h2>
+        <span class="badge">${unblockReqs.length} pending</span>
+      </div>
+      <div class="card-body">
+        ${unblockReqsHtml || '<div style="color:#888; font-size:14px; text-align:center; padding:20px;">No unblock requests</div>'}
+      </div>
+    </div>
+
   </div>
 
-  <div class="footer">SafeBrowser Admin Dashboard • Built with Cloudflare Workers + KV</div>
+  <div id="toast" class="toast">Action completed successfully</div>
 
-  <!-- Full Data Modal -->
-  <div id="dataModal" class="modal-overlay">
+  <!-- Modal -->
+  <div class="modal-overlay" id="dataModal">
     <div class="modal-content">
-      <div class="modal-header">
-        <h3>Full Data View</h3>
-        <button class="modal-close" onclick="closeDataModal()">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="field">
-          <div class="label">Domain / URL</div>
-          <div id="modalDom" class="value"></div>
-        </div>
-        <div class="field">
-          <div class="label">Page Title</div>
-          <div id="modalTitle" class="value"></div>
-        </div>
-        <div class="field">
-          <div class="label">Meta Description</div>
-          <div id="modalDesc" class="value"></div>
-        </div>
-      </div>
+      <div class="modal-title" id="modalDom">Domain Name</div>
+      <div style="font-size:13px; margin-bottom:10px;"><strong>Title:</strong> <span id="modalTitle" style="color:#4b5563;"></span></div>
+      <div style="font-size:13px; margin-bottom:20px;"><strong>Description:</strong> <span id="modalDesc" style="color:#4b5563;"></span></div>
+      <button class="btn-secondary" style="width:100%;" onclick="closeDataModal()">Close</button>
     </div>
   </div>
 
   <script>
+    const params = new URLSearchParams(window.location.search);
+    const msg = params.get('msg');
+    if (msg) {
+      const toast = document.getElementById('toast');
+      const count = params.get('count');
+      if (msg === 'added') toast.textContent = 'Added ' + count + ' domains to list';
+      else if (msg === 'updated') toast.textContent = 'Policy updated successfully';
+      else if (msg === 'removed') toast.textContent = 'Removed successfully';
+      else if (msg === 'approved') toast.textContent = 'Unblock request approved';
+      else if (msg === 'denied') toast.textContent = 'Unblock request denied';
+      
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3000);
+      window.history.replaceState({}, document.title, '/admin');
+    }
+
+    function filterClassifications() {
+        const cat = document.getElementById('classFilter').value;
+        const rows = document.querySelectorAll('.class-row');
+        rows.forEach(row => {
+            if (cat === 'ALL' || row.dataset.category === cat) {
+                row.style.display = 'flex';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+    }
+
     function openDataModal(dom, title, desc) {
       document.getElementById('modalDom').textContent = dom || 'N/A';
       document.getElementById('modalTitle').textContent = title || 'No Title Available';
@@ -1063,82 +995,38 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
     function closeDataModal() {
       document.getElementById('dataModal').classList.remove('active');
     }
-
-    const params = new URLSearchParams(window.location.search);
-    const msg = params.get('msg');
-    const count = params.get('count');
-    if (msg) {
-      const messages = {
-        added: count + ' domain(s) added to blocklist',
-        ignored: count + ' domain(s) ignored',
-        removed: 'Domain removed from blocklist',
-        req_denied: 'Request removed from unblock list',
-        unignored: 'Domain un-ignored and will show in pending again',
-        updated: 'Settings updated successfully'
-      };
-      const toast = document.createElement('div');
-      toast.className = 'toast';
-      toast.textContent = messages[msg] || 'Action completed';
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 3000);
-      window.history.replaceState({}, '', '/admin');
-    }
-
-    // Select All Logic
-    const selectAllCb = document.getElementById('selectAllPending');
-    const pendingCbs = Array.from(document.querySelectorAll('.pending-cb'));
-    if (selectAllCb) {
-      selectAllCb.addEventListener('change', (e) => {
-        pendingCbs.forEach(cb => cb.checked = e.target.checked);
-      });
-    }
-
-    // Shift-click logic
+    
     let lastChecked = null;
-    pendingCbs.forEach(cb => {
-      cb.addEventListener('click', (e) => {
-        if (!lastChecked) {
-          lastChecked = cb;
-          return;
-        }
-        if (e.shiftKey) {
-          const start = pendingCbs.indexOf(cb);
-          const end = pendingCbs.indexOf(lastChecked);
-          const slice = pendingCbs.slice(Math.min(start, end), Math.max(start, end) + 1);
-          slice.forEach(c => c.checked = lastChecked.checked);
-        }
-        lastChecked = cb;
-      });
+    const checkboxes = document.querySelectorAll('input[name="domains"]');
+    checkboxes.forEach(chk => {
+        chk.addEventListener('click', function(e) {
+            if (!lastChecked) {
+                lastChecked = this;
+                return;
+            }
+            if (e.shiftKey) {
+                const start = Array.from(checkboxes).indexOf(this);
+                const end = Array.from(checkboxes).indexOf(lastChecked);
+                const min = Math.min(start, end);
+                const max = Math.max(start, end);
+                for (let i = min; i <= max; i++) {
+                    checkboxes[i].checked = lastChecked.checked;
+                }
+            }
+            lastChecked = this;
+        });
     });
+
+    let allSelected = false;
+    function selectAll() {
+        allSelected = !allSelected;
+        checkboxes.forEach(cb => cb.checked = allSelected);
+    }
   </script>
 </body>
 </html>`;
 }
 
-
-// ── AI Classification & Policy Engine ──────────────────────────────────────
-
-const TAXONOMY = [
-    "EDUCATION", "GOVERNMENT", "NEWS", "TECHNOLOGY", "AI_TOOLS", "SEARCH_ENGINE",
-    "REFERENCE", "HEALTH", "FINANCE", "SHOPPING", "PRODUCTIVITY", "COMMUNICATION",
-    "SOCIAL_MEDIA", "FORUM_COMMUNITY", "VIDEO_STREAMING", "MUSIC_AUDIO",
-    "ENTERTAINMENT", "GAMING", "DATING", "GAMBLING", "ADULT_SEXUAL", "DRUGS",
-    "WEAPONS", "GRAPHIC_VIOLENCE", "HATE_EXTREMISM", "MALWARE_PHISHING",
-    "SCAM_FRAUD", "PROXY_VPN_BYPASS", "FILE_SHARING", "CLOUD_STORAGE",
-    "DOWNLOAD_SITE", "ADVERTISEMENT", "OTHER", "UNKNOWN"
-];
-
-const DEFAULT_CATEGORY_POLICY = {
-    "GAMBLING": "BLOCK",
-    "ADULT_SEXUAL": "BLOCK",
-    "DRUGS": "BLOCK",
-    "WEAPONS": "BLOCK",
-    "GRAPHIC_VIOLENCE": "BLOCK",
-    "HATE_EXTREMISM": "BLOCK",
-    "MALWARE_PHISHING": "BLOCK",
-    "SCAM_FRAUD": "BLOCK",
-    "PROXY_VPN_BYPASS": "BLOCK"
-};
 
 async function getCategoryPolicy(env) {
     try {
