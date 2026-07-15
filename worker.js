@@ -134,7 +134,19 @@ export default {
                     config = { ...config, ...parsed };
                 } catch(e) {}
             }
-            return new Response(JSON.stringify(config), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+            
+            // Only return fields the Android app expects
+            const publicConfig = {
+                version: config.version || '1.0.0',
+                updated: config.updated || new Date().toISOString(),
+                blocked_domains: config.blocked_domains || [],
+                blocked_keywords: config.blocked_keywords || [],
+                video_blocking: config.video_blocking !== false,
+                audio_blocking: config.audio_blocking !== false,
+                shortcuts: config.shortcuts || []
+            };
+            
+            return new Response(JSON.stringify(publicConfig), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
 
         // ═══════════════════════════════════════════════════════════
