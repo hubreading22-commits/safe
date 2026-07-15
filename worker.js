@@ -176,8 +176,9 @@ export default {
 
                 // Migration: preserve legacy blocks/ignores
                 let needsConfigSave = false;
-                if (!config.manual_blocks) {
-                    config.manual_blocks = config.blocked_domains && config.blocked_domains.length > 0 ? [...config.blocked_domains] : [];
+                if (!config.manual_blocks || config.manual_blocks.length === 0) {
+                    const fallback = ['youtube.com', 'facebook.com', 'tiktok.com', 'netflix.com', 'twitter.com', 'instagram.com', 'cricbuzz.com'];
+                    config.manual_blocks = config.blocked_domains && config.blocked_domains.length > 0 ? [...config.blocked_domains] : fallback;
                     needsConfigSave = true;
                 }
                 if (!config.manual_allows) {
