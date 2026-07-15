@@ -84,6 +84,11 @@ export default {
                 }
 
                 await kvPut('pending_domains', JSON.stringify(merged));
+                
+                if (ctx && ctx.waitUntil) {
+                    ctx.waitUntil(classifyBackground(env, newEntries));
+                }
+
                 return jsonResponse({ ok: true, added: newEntries.length, total_pending: merged.length }, 200, corsHeaders);
             } catch (e) {
                 return jsonResponse({ ok: false, error: e.message }, 500, corsHeaders);
@@ -224,7 +229,9 @@ export default {
                     const normalized = domainsToAdd
                         .map(d => d.toLowerCase().trim().replace(/^www\./, ''))
                         .filter(d => d.length > 0);
-                    config.blocked_domains = [...new Set([...(config.blocked_domains || []), ...normalized])];
+                    config.manual_blocks = [...new Set([...(config.manual_blocks || []), ...normalized])];
+                    await kvPut('config', JSON.stringify(config));
+                    await rebuildEffectiveConfig(env);
                     config.updated = new Date().toISOString();
                     config.version = bumpVersion(config.version);
                     await kvPut('config', JSON.stringify(config));
@@ -292,7 +299,10 @@ export default {
                     const configRaw = await kvGet('config');
                     if (configRaw) {
                         const config = JSON.parse(configRaw);
-                        config.blocked_domains = (config.blocked_domains || []).filter(d => d !== domain);
+                        config.manual_blocks = (config.manual_blocks || []).filter(d => d !== domain);
+                        config.manual_allows = [...new Set([...(config.manual_allows || []), domain])];
+                        await kvPut('config', JSON.stringify(config));
+                        await rebuildEffectiveConfig(env);
                         config.updated = new Date().toISOString();
                         config.version = bumpVersion(config.version);
                         await kvPut('config', JSON.stringify(config));
@@ -344,7 +354,10 @@ export default {
                     const configRaw = await kvGet('config');
                     if (configRaw) {
                         const config = JSON.parse(configRaw);
-                        config.blocked_domains = (config.blocked_domains || []).filter(d => d !== domain);
+                        config.manual_blocks = (config.manual_blocks || []).filter(d => d !== domain);
+                        config.manual_allows = [...new Set([...(config.manual_allows || []), domain])];
+                        await kvPut('config', JSON.stringify(config));
+                        await rebuildEffectiveConfig(env);
                         config.updated = new Date().toISOString();
                         config.version = bumpVersion(config.version);
                         await kvPut('config', JSON.stringify(config));
@@ -395,7 +408,9 @@ export default {
                         version: '1.0.0', updated: new Date().toISOString(),
                         blocked_domains: [], blocked_keywords: [], video_blocking: true, audio_blocking: true
                     };
-                    config.blocked_domains = [...new Set([...(config.blocked_domains || []), normalized])];
+                    config.manual_blocks = [...new Set([...(config.manual_blocks || []), normalized])];
+                    await kvPut('config', JSON.stringify(config));
+                    await rebuildEffectiveConfig(env);
                     config.updated = new Date().toISOString();
                     config.version = bumpVersion(config.version);
                     await kvPut('config', JSON.stringify(config));
@@ -454,8 +469,12 @@ export default {
 
         return new Response('Not Found', { status: 404 });
     }
-};
+    },
 
+    async scheduled(event, env, ctx) {
+        await runScheduler(env, ctx);
+    }
+};
 // ── Helpers ──────────────────────────────────────────────────
 
 function jsonResponse(data, status = 200, extraHeaders = {}) {
@@ -1095,4 +1114,257 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
   </script>
 </body>
 </html>`;
+}
+
+
+// ── AI Classification & Policy Engine ──────────────────────────────────────
+
+const TAXONOMY = [
+    "EDUCATION", "GOVERNMENT", "NEWS", "TECHNOLOGY", "AI_TOOLS", "SEARCH_ENGINE",
+    "REFERENCE", "HEALTH", "FINANCE", "SHOPPING", "PRODUCTIVITY", "COMMUNICATION",
+    "SOCIAL_MEDIA", "FORUM_COMMUNITY", "VIDEO_STREAMING", "MUSIC_AUDIO",
+    "ENTERTAINMENT", "GAMING", "DATING", "GAMBLING", "ADULT_SEXUAL", "DRUGS",
+    "WEAPONS", "GRAPHIC_VIOLENCE", "HATE_EXTREMISM", "MALWARE_PHISHING",
+    "SCAM_FRAUD", "PROXY_VPN_BYPASS", "FILE_SHARING", "CLOUD_STORAGE",
+    "DOWNLOAD_SITE", "ADVERTISEMENT", "OTHER", "UNKNOWN"
+];
+
+const DEFAULT_CATEGORY_POLICY = {
+    "GAMBLING": "BLOCK",
+    "ADULT_SEXUAL": "BLOCK",
+    "DRUGS": "BLOCK",
+    "WEAPONS": "BLOCK",
+    "GRAPHIC_VIOLENCE": "BLOCK",
+    "HATE_EXTREMISM": "BLOCK",
+    "MALWARE_PHISHING": "BLOCK",
+    "SCAM_FRAUD": "BLOCK",
+    "PROXY_VPN_BYPASS": "BLOCK"
+};
+
+async function getCategoryPolicy(env) {
+    try {
+        const raw = await env.SAFEBROWSER_KV.get('category_policy');
+        if (raw) return JSON.parse(raw);
+    } catch(e) {}
+    return DEFAULT_CATEGORY_POLICY;
+}
+
+// Scans pending domains and groups by hostname to find best context
+function getBestContexts(pendingArray) {
+    const map = new Map();
+    for (const item of pendingArray) {
+        if (!item || !item.domain) continue;
+        const dom = String(item.domain).toLowerCase().trim().replace(/^www\./, '');
+        const title = String(item.title || '');
+        const desc = String(item.description || '');
+        const url = String(item.url || '');
+        
+        let score = 0;
+        if (title.length > 3 && title.toLowerCase() !== 'home') score += 2;
+        if (desc.length > 5) score += 3;
+        if (url.length > dom.length + 8) score += 1;
+        
+        const current = map.get(dom);
+        if (!current || score > current.score) {
+            map.set(dom, { domain: dom, title, description: desc, url, score, attempts: item.attempts || 0 });
+        }
+    }
+    return Array.from(map.values());
+}
+
+async function callAI(env, domainsBatch) {
+    const apiKey = env.AI_API_KEY;
+    if (!apiKey) throw new Error("AI_API_KEY not set");
+    const model = env.AI_MODEL || "gpt-4o-mini";
+    const endpoint = "https://aicore.dpdns.org/v1/chat/completions";
+
+    const prompt = `You are a strict internet safety classifier. Classify the following domains based on their title and description.
+You MUST choose exactly ONE category from this list:
+${TAXONOMY.join(", ")}
+
+Return ONLY a JSON array of objects with keys: "domain", "category", "confidence" (0.0 to 1.0), and "reason".
+Do not include markdown blocks or any other text.
+
+Domains to classify:
+${JSON.stringify(domainsBatch.map(d => ({ domain: d.domain, title: d.title, description: d.description })), null, 2)}`;
+
+    const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+            model: model,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.0
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`AI API HTTP error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    let content = data.choices[0].message.content.trim();
+    if (content.startsWith("\`\`\`json")) {
+        content = content.substring(7);
+        if (content.endsWith("\`\`\`")) content = content.slice(0, -3);
+    }
+    
+    return JSON.parse(content);
+}
+
+// Background classification immediately after POST /api/domains
+async function classifyBackground(env, newEntries) {
+    try {
+        if (!env.AI_API_KEY) return;
+        
+        const pendingRaw = await env.SAFEBROWSER_KV.get('pending_domains') || '[]';
+        const pending = JSON.parse(pendingRaw);
+        
+        const newHostnames = [...new Set(newEntries.map(e => e.domain))];
+        const relevantPending = pending.filter(p => newHostnames.includes(p.domain));
+        
+        const bestContexts = getBestContexts(relevantPending);
+        if (bestContexts.length === 0) return;
+        
+        // Take up to 10 for immediate processing
+        const batch = bestContexts.slice(0, 10);
+        
+        const aiResults = await callAI(env, batch);
+        await processAiResults(env, aiResults, batch);
+    } catch(e) {
+        console.error("classifyBackground error:", e);
+    }
+}
+
+// Scheduled retry mechanism
+async function runScheduler(env, ctx) {
+    if (!env.AI_API_KEY) return;
+
+    try {
+        const pendingRaw = await env.SAFEBROWSER_KV.get('pending_domains') || '[]';
+        let pending = JSON.parse(pendingRaw);
+        
+        const classRaw = await env.SAFEBROWSER_KV.get('domain_classifications') || '{}';
+        const classifications = JSON.parse(classRaw);
+        
+        pending = pending.filter(p => {
+            if (classifications[p.domain]) return false; // already classified
+            return true;
+        });
+
+        const bestContexts = getBestContexts(pending);
+        
+        const MAX_CHUNKS = 3;
+        const BATCH_SIZE = 10;
+        
+        for (let i = 0; i < Math.min(bestContexts.length, MAX_CHUNKS * BATCH_SIZE); i += BATCH_SIZE) {
+            const batch = bestContexts.slice(i, i + BATCH_SIZE);
+            try {
+                const aiResults = await callAI(env, batch);
+                await processAiResults(env, aiResults, batch);
+            } catch(e) {
+                console.error("Scheduler API failure, stopping cron cycle:", e);
+                // Increment attempts for this batch
+                const pRaw = await env.SAFEBROWSER_KV.get('pending_domains') || '[]';
+                let pList = JSON.parse(pRaw);
+                batch.forEach(b => {
+                    pList.forEach(p => {
+                        if (p.domain === b.domain) p.attempts = (p.attempts || 0) + 1;
+                    });
+                });
+                await env.SAFEBROWSER_KV.put('pending_domains', JSON.stringify(pList));
+                break; // fail fast
+            }
+        }
+    } catch(e) {
+        console.error("Scheduler error:", e);
+    }
+}
+
+async function processAiResults(env, aiResults, batch) {
+    if (!Array.isArray(aiResults)) return;
+
+    const classRaw = await env.SAFEBROWSER_KV.get('domain_classifications') || '{}';
+    const classifications = JSON.parse(classRaw);
+    
+    let updatedClassifications = false;
+    let successfulDomains = new Set();
+    let lowConfidenceDomains = new Set();
+
+    for (const res of aiResults) {
+        if (!res.domain || !res.category) continue;
+        const dom = res.domain.toLowerCase();
+        
+        // Concurrency check
+        if (classifications[dom]) {
+            successfulDomains.add(dom);
+            continue;
+        }
+
+        if (res.confidence >= 0.90) {
+            classifications[dom] = {
+                category: TAXONOMY.includes(res.category) ? res.category : "OTHER",
+                confidence: res.confidence,
+                reason: res.reason,
+                timestamp: Date.now()
+            };
+            updatedClassifications = true;
+            successfulDomains.add(dom);
+        } else {
+            lowConfidenceDomains.add(dom);
+        }
+    }
+
+    if (updatedClassifications) {
+        await env.SAFEBROWSER_KV.put('domain_classifications', JSON.stringify(classifications));
+        await rebuildEffectiveConfig(env);
+    }
+
+    // Update pending_domains safely
+    const pRaw = await env.SAFEBROWSER_KV.get('pending_domains') || '[]';
+    let pList = JSON.parse(pRaw);
+    
+    pList = pList.filter(p => {
+        const dom = String(p.domain).toLowerCase();
+        if (successfulDomains.has(dom)) return false; // remove successful
+        if (lowConfidenceDomains.has(dom)) {
+            p.lastResult = "LOW_CONFIDENCE";
+            p.lastAttemptAt = Date.now();
+        }
+        return true;
+    });
+    
+    await env.SAFEBROWSER_KV.put('pending_domains', JSON.stringify(pList));
+}
+
+async function rebuildEffectiveConfig(env) {
+    const configRaw = await env.SAFEBROWSER_KV.get('config') || '{}';
+    let config = JSON.parse(configRaw);
+    
+    const classRaw = await env.SAFEBROWSER_KV.get('domain_classifications') || '{}';
+    const classifications = JSON.parse(classRaw);
+    
+    const policy = await getCategoryPolicy(env);
+    
+    const manualBlocks = config.manual_blocks || [];
+    
+    let effective = new Set(manualBlocks);
+    
+    for (const [dom, data] of Object.entries(classifications)) {
+        if (policy[data.category] === "BLOCK") {
+            effective.add(dom);
+        }
+    }
+    
+    config.blocked_domains = Array.from(effective);
+    
+    const parts = (config.version || '1.0.0').split('.');
+    parts[2] = (parseInt(parts[2] || '0') + 1).toString();
+    config.version = parts.join('.');
+    config.updated = new Date().toISOString();
+    
+    await env.SAFEBROWSER_KV.put('config', JSON.stringify(config));
 }
