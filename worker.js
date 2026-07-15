@@ -1028,6 +1028,30 @@ function adminDashboard(pending, ignored, config, adminPassword, unblockReqs = [
 }
 
 
+// ── AI Classification & Policy Engine ──────────────────────────────────────
+
+const TAXONOMY = [
+    "EDUCATION", "GOVERNMENT", "NEWS", "TECHNOLOGY", "AI_TOOLS", "SEARCH_ENGINE",
+    "REFERENCE", "HEALTH", "FINANCE", "SHOPPING", "PRODUCTIVITY", "COMMUNICATION",
+    "SOCIAL_MEDIA", "FORUM_COMMUNITY", "VIDEO_STREAMING", "MUSIC_AUDIO",
+    "ENTERTAINMENT", "GAMING", "DATING", "GAMBLING", "ADULT_SEXUAL", "DRUGS",
+    "WEAPONS", "GRAPHIC_VIOLENCE", "HATE_EXTREMISM", "MALWARE_PHISHING",
+    "SCAM_FRAUD", "PROXY_VPN_BYPASS", "FILE_SHARING", "CLOUD_STORAGE",
+    "DOWNLOAD_SITE", "ADVERTISEMENT", "OTHER", "UNKNOWN"
+];
+
+const DEFAULT_CATEGORY_POLICY = {
+    "GAMBLING": "BLOCK",
+    "ADULT_SEXUAL": "BLOCK",
+    "DRUGS": "BLOCK",
+    "WEAPONS": "BLOCK",
+    "GRAPHIC_VIOLENCE": "BLOCK",
+    "HATE_EXTREMISM": "BLOCK",
+    "MALWARE_PHISHING": "BLOCK",
+    "SCAM_FRAUD": "BLOCK",
+    "PROXY_VPN_BYPASS": "BLOCK"
+};
+
 async function getCategoryPolicy(env) {
     try {
         const raw = await env.SAFEBROWSER_KV.get('category_policy');
