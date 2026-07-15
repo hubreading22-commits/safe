@@ -1260,6 +1260,10 @@ async function rebuildEffectiveConfig(env) {
     
     const policy = await getCategoryPolicy(env);
     
+    // Migration: preserve legacy blocks
+    if (!config.manual_blocks && config.blocked_domains && config.blocked_domains.length > 0) {
+        config.manual_blocks = [...config.blocked_domains];
+    }
     const manualBlocks = config.manual_blocks || [];
     
     let effective = new Set(manualBlocks);
